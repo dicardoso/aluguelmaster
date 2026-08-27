@@ -1,0 +1,5 @@
+{
+  "name": "AluguelMaster - Gestão de Contratos",
+  "description": "Sistema completo para gestão de contratos de aluguel residencial e comercial, com geração de PDF, notificações e controle de pagamentos.",
+  "requestFramePermissions": []
+}

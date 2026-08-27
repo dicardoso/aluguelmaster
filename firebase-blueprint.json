@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile with role and contact info",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string" },
+        "displayName": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "landlord", "tenant"] },
+        "phone": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Property": {
+      "title": "Property",
+      "description": "Rental property details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "address": { "type": "string" },
+        "type": { "type": "string", "enum": ["residential", "commercial"] },
+        "description": { "type": "string" },
+        "ownerUid": { "type": "string" },
+        "monthlyRent": { "type": "number" },
+        "status": { "type": "string", "enum": ["available", "rented", "maintenance"] }
+      },
+      "required": ["address", "type", "ownerUid", "monthlyRent"]
+    },
+    "Contract": {
+      "title": "Contract",
+      "description": "Rental contract between landlord and tenant",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "landlordUid": { "type": "string" },
+        "tenantUid": { "type": "string" },
+        "startDate": { "type": "string", "format": "date" },
+        "endDate": { "type": "string", "format": "date" },
+        "monthlyRent": { "type": "number" },
+        "status": { "type": "string", "enum": ["active", "expired", "terminated", "pending"] },
+        "pdfUrl": { "type": "string" },
+        "signedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["propertyId", "landlordUid", "tenantUid", "startDate", "endDate", "monthlyRent"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "Monthly rent payment record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "contractId": { "type": "string" },
+        "tenantUid": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "string", "format": "date" },
+        "paidAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "paid", "overdue"] },
+        "receiptUrl": { "type": "string" }
+      },
+      "required": ["contractId", "tenantUid", "amount", "dueDate", "status"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "appName": { "type": "string" },
+        "companyName": { "type": "string" },
+        "supportEmail": { "type": "string" },
+        "smtpHost": { "type": "string" },
+        "smtpPort": { "type": "number" },
+        "smtpUser": { "type": "string" },
+        "smtpPassword": { "type": "string" },
+        "emailFrom": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/users/{uid}": { "schema": "User", "description": "User profiles" },
+    "/properties/{propertyId}": { "schema": "Property", "description": "Managed properties" },
+    "/contracts/{contractId}": { "schema": "Contract", "description": "Rental contracts" },
+    "/payments/{paymentId}": { "schema": "Payment", "description": "Rent payments" },
+    "/settings/{settingId}": { "schema": "Settings", "description": "Global application settings" }
+  }
+}
