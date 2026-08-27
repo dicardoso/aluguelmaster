@@ -95,8 +95,8 @@ export default function Properties() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Meus Imóveis</h2>
-          <p className="text-gray-500">Gerencie seu portfólio de imóveis residenciais e comerciais.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Meus Imóveis</h2>
+          <p className="text-gray-500 dark:text-gray-400">Gerencie seu portfólio de imóveis residenciais e comerciais.</p>
         </div>
         <button
           onClick={() => { setIsModalOpen(true); setEditingProperty(null); }}

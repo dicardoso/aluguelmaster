@@ -261,8 +261,10 @@ export default function Contracts() {
   const createPaymentsForContract = async (contract: Contract) => {
     const start = parseISO(contract.startDate);
     const end = parseISO(contract.endDate);
-    const months = differenceInMonths(end, start);
-    
+    const fullMonths = differenceInMonths(end, start);
+    // Include a final partial-month payment when the term doesn't end on an exact month boundary
+    const months = addMonths(start, fullMonths) < end ? fullMonths + 1 : fullMonths;
+
     const paymentPromises = [];
     for (let i = 0; i < months; i++) {
       const dueDate = addMonths(start, i);
@@ -368,6 +370,10 @@ export default function Contracts() {
         createdAt: new Date().toISOString()
       };
       delete (newContractData as any).id;
+      // A renewed contract is a new, unsigned document — don't carry over the old signature/PDF
+      delete (newContractData as any).pdfUrl;
+      delete (newContractData as any).signedAt;
+      delete (newContractData as any).signedContractUrl;
       
       const docRef = await addDoc(collection(db, 'contracts'), newContractData);
       const newContract = { id: docRef.id, ...newContractData } as Contract;
@@ -451,8 +457,8 @@ export default function Contracts() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Contratos</h2>
-          <p className="text-gray-500">Acompanhe e gerencie todos os contratos de locação.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Contratos</h2>
+          <p className="text-gray-500 dark:text-gray-400">Acompanhe e gerencie todos os contratos de locação.</p>
         </div>
         {(isAdmin || isLandlord) && (
           <button

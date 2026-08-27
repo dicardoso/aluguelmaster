@@ -52,18 +52,20 @@ export default function Users() {
         // Pre-registration: Use email as temporary ID or a random one if we don't have UID yet
         // For Google Auth, we usually wait for them to login, but we can pre-set roles by email
         // We'll use a special collection or just add to 'users' with a flag
-        const userQuery = users.find(u => u.email === formData.email);
+        const normalizedEmail = (formData.email || '').toLowerCase();
+        const userQuery = users.find(u => u.email?.toLowerCase() === normalizedEmail);
         if (userQuery) {
           toast.error('Este e-mail já está cadastrado.');
           return;
         }
 
-        // We'll create a document with a random ID if it's a new invite, 
+        // We'll create a document with a random ID if it's a new invite,
         // but our useAuth hook needs to be updated to look for email-based pre-configs.
         // For simplicity in this demo, we'll just add to the users collection.
         const newId = `invite_${Date.now()}`;
         await setDoc(doc(db, 'users', newId), {
           ...formData,
+          email: normalizedEmail,
           phone: formData.phone || '',
           cpf: formData.cpf || '',
           address: formData.address || '',
@@ -86,8 +88,8 @@ export default function Users() {
     return (
       <div className="flex flex-col items-center justify-center h-full text-center">
         <Shield className="w-16 h-16 text-red-100 mb-4" />
-        <h2 className="text-xl font-bold text-gray-900">Acesso Restrito</h2>
-        <p className="text-gray-500">Apenas administradores podem gerenciar usuários.</p>
+        <h2 className="text-xl font-bold text-gray-900 dark:text-white">Acesso Restrito</h2>
+        <p className="text-gray-500 dark:text-gray-400">Apenas administradores podem gerenciar usuários.</p>
       </div>
     );
   }
@@ -96,8 +98,8 @@ export default function Users() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Gestão de Usuários</h2>
-          <p className="text-gray-500">Controle de acessos e perfis de proprietários e inquilinos.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Gestão de Usuários</h2>
+          <p className="text-gray-500 dark:text-gray-400">Controle de acessos e perfis de proprietários e inquilinos.</p>
         </div>
         <button
           onClick={() => { setIsModalOpen(true); setEditingUser(null); setFormData({ email: '', displayName: '', role: 'tenant', phone: '', cpf: '', address: '' }); }}

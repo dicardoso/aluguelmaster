@@ -57,9 +57,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setProfile(data);
             applyTheme(data.themePreference);
           } else {
-            // Check for pre-registration by email
+            // Check for pre-registration by email (case-insensitive: emails are stored lowercase)
             const usersRef = collection(db, 'users');
-            const q = query(usersRef, where('email', '==', firebaseUser.email));
+            const q = query(usersRef, where('email', '==', firebaseUser.email?.toLowerCase()));
             const querySnap = await getDocs(q);
             
             if (!querySnap.empty) {
@@ -83,7 +83,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               // Create default profile for new users
               const newProfile: UserProfile = {
                 uid: firebaseUser.uid,
-                email: firebaseUser.email || '',
+                email: firebaseUser.email?.toLowerCase() || '',
                 displayName: firebaseUser.displayName || '',
                 role: 'tenant', // Default role
                 themePreference: 'system',

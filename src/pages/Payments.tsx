@@ -192,9 +192,12 @@ export default function Payments() {
     setCurrentPage(1);
   }, [filterStatus, searchQuery]);
 
+  const getEffectiveStatus = (payment: Payment): Payment['status'] =>
+    payment.status === 'pending' && new Date(payment.dueDate) < new Date() ? 'overdue' : payment.status;
+
   const filteredPayments = payments.filter(payment => {
-    const matchesStatus = filterStatus === 'all' || payment.status === filterStatus;
-    
+    const matchesStatus = filterStatus === 'all' || getEffectiveStatus(payment) === filterStatus;
+
     const tenant = users.find(u => u.uid === payment.tenantUid);
     const contract = contracts.find(c => c.id === payment.contractId);
     const property = properties.find(p => p.id === contract?.propertyId);
@@ -237,8 +240,8 @@ export default function Payments() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-2xl font-bold text-gray-900">Pagamentos</h2>
-          <p className="text-gray-500">Controle financeiro e baixa de mensalidades.</p>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Pagamentos</h2>
+          <p className="text-gray-500 dark:text-gray-400">Controle financeiro e baixa de mensalidades.</p>
         </div>
         {(isAdmin || isLandlord) && (
           <button
@@ -283,16 +286,17 @@ export default function Payments() {
           const tenant = users.find(u => u.uid === payment.tenantUid);
           const contract = contracts.find(c => c.id === payment.contractId);
           const property = properties.find(p => p.id === contract?.propertyId);
+          const status = getEffectiveStatus(payment);
 
           return (
             <div key={payment.id} className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 group hover:border-blue-100 dark:hover:border-blue-900 transition-colors">
               <div className="flex items-center gap-4">
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
-                  payment.status === 'paid' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' : 
-                  payment.status === 'overdue' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
+                  status === 'paid' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' :
+                  status === 'overdue' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
                 }`}>
-                  {payment.status === 'paid' ? <CheckCircle className="w-6 h-6" /> : 
-                   payment.status === 'overdue' ? <AlertCircle className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
+                  {status === 'paid' ? <CheckCircle className="w-6 h-6" /> :
+                   status === 'overdue' ? <AlertCircle className="w-6 h-6" /> : <Clock className="w-6 h-6" />}
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
@@ -313,13 +317,13 @@ export default function Payments() {
 
               <div className="flex items-center gap-3 self-end sm:self-auto">
                 <span className={`px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider ${
-                  payment.status === 'paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 
-                  payment.status === 'overdue' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+                  status === 'paid' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' :
+                  status === 'overdue' ? 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
                 }`}>
-                  {payment.status === 'paid' ? 'Pago' : payment.status === 'overdue' ? 'Atrasado' : 'Aguardando'}
+                  {status === 'paid' ? 'Pago' : status === 'overdue' ? 'Atrasado' : 'Aguardando'}
                 </span>
-                
-                {payment.status === 'paid' ? (
+
+                {status === 'paid' ? (
                   <button
                     onClick={() => generateReceipt(payment)}
                     className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
