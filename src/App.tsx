@@ -46,7 +46,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 export default function App() {
   return (
-    <AuthProvider children={undefined}>
+    <AuthProvider>
       <ReminderTrigger />
       <Router>
         <Routes>
@@ -54,8 +54,8 @@ export default function App() {
           <Route
             path="/*"
             element={
-              <ProtectedRoute children={undefined}>
-                <Layout children={undefined}>
+              <ProtectedRoute>
+                <Layout>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/properties" element={<Properties />} />
