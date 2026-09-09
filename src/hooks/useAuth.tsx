@@ -1,8 +1,8 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, db, doc, getDoc, setDoc, collection, query, where, getDocs, deleteDoc, handleFirestoreError, OperationType } from '../firebase';
-import { UserProfile, UserRole } from '../types';
-import { sendWelcomeEmail } from '../lib/email';
+import { auth } from '../firebase';
+import { UserProfile } from '../types';
+import { apiFetch } from '../lib/api';
 
 interface AuthContextType {
   user: User | null;
@@ -23,6 +23,11 @@ const AuthContext = createContext<AuthContextType>({
   isTenant: false,
   updateTheme: async () => {},
 });
+
+// The API returns the Postgres row shape (`id`), while the rest of the app still
+// addresses users by `uid` (a holdover from the Firestore days) — bridge the two here
+// instead of renaming every `profile.uid` call site in this migration step.
+const toUserProfile = (data: any): UserProfile => ({ ...data, uid: data.id });
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -48,64 +53,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
-        const docRef = doc(db, 'users', firebaseUser.uid);
         try {
-          const docSnap = await getDoc(docRef);
-          
-          if (docSnap.exists()) {
-            const data = docSnap.data() as UserProfile;
-            setProfile(data);
-            applyTheme(data.themePreference);
-          } else {
-            // Check for pre-registration by email (case-insensitive: emails are stored lowercase)
-            const usersRef = collection(db, 'users');
-            const q = query(usersRef, where('email', '==', firebaseUser.email?.toLowerCase()));
-            const querySnap = await getDocs(q);
-            
-            if (!querySnap.empty) {
-              // Found a pre-registration! Update it with the real UID
-              const preRegDoc = querySnap.docs[0];
-              const preRegData = preRegDoc.data() as UserProfile;
-              
-              const newProfile: UserProfile = {
-                ...preRegData,
-                uid: firebaseUser.uid,
-                displayName: firebaseUser.displayName || preRegData.displayName,
-              };
-              
-              await setDoc(docRef, newProfile);
-              // Delete the temporary invite doc if it had a different ID
-              if (preRegDoc.id !== firebaseUser.uid) {
-                await deleteDoc(doc(db, 'users', preRegDoc.id));
-              }
-              setProfile(newProfile);
-            } else {
-              // Create default profile for new users
-              const newProfile: UserProfile = {
-                uid: firebaseUser.uid,
-                email: firebaseUser.email?.toLowerCase() || '',
-                displayName: firebaseUser.displayName || '',
-                role: 'tenant', // Default role
-                themePreference: 'system',
-                createdAt: new Date().toISOString(),
-              };
-              await setDoc(docRef, newProfile);
-              setProfile(newProfile);
-              applyTheme('system');
-              
-              // Send welcome email for new users
-              try {
-                if (firebaseUser.email) {
-                  await sendWelcomeEmail(firebaseUser.email, firebaseUser.displayName || '');
-                }
-              } catch (emailError) {
-                console.error('Failed to send welcome email:', emailError);
-                // Don't block the login process if email fails
-              }
-            }
-          }
+          const data = await apiFetch<any>('/api/me');
+          const loadedProfile = toUserProfile(data);
+          setProfile(loadedProfile);
+          applyTheme(loadedProfile.themePreference);
         } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${firebaseUser.uid}`);
+          console.error('Failed to load profile:', error);
         }
       } else {
         setProfile(null);
@@ -131,11 +85,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const updateTheme = async (theme: 'light' | 'dark' | 'system') => {
     if (!user || !profile) return;
-    
+
     try {
-      const docRef = doc(db, 'users', user.uid);
-      await setDoc(docRef, { themePreference: theme }, { merge: true });
-      setProfile({ ...profile, themePreference: theme });
+      const data = await apiFetch<any>('/api/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ themePreference: theme }),
+      });
+      setProfile(toUserProfile(data));
       applyTheme(theme);
     } catch (error) {
       console.error('Failed to update theme:', error);

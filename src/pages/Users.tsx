@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, collection, onSnapshot, doc, updateDoc, setDoc, getDoc, handleFirestoreError, OperationType } from '../firebase';
+import { apiFetch, ApiError } from '../lib/api';
 import { UserProfile, UserRole } from '../types';
 import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,17 +22,20 @@ export default function Users() {
 
   const [confirmSave, setConfirmSave] = useState(false);
 
+  const fetchUsers = useCallback(async () => {
+    try {
+      const data = await apiFetch<any[]>('/api/users');
+      setUsers(data.map((u) => ({ ...u, uid: u.id })));
+    } catch (error) {
+      console.error('Failed to load users:', error);
+      toast.error('Erro ao carregar usuários.');
+    }
+  }, []);
+
   useEffect(() => {
     if (!profile || !isAdmin) return;
-
-    const unsubscribe = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'users');
-    });
-
-    return () => unsubscribe();
-  }, [profile, isAdmin]);
+    fetchUsers();
+  }, [profile, isAdmin, fetchUsers]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -40,38 +43,21 @@ export default function Users() {
 
     try {
       if (editingUser) {
-        await updateDoc(doc(db, 'users', editingUser.uid), {
-          role: formData.role,
-          phone: formData.phone || '',
-          cpf: formData.cpf || '',
-          address: formData.address || '',
-          displayName: formData.displayName,
+        await apiFetch(`/api/users/${editingUser.uid}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            role: formData.role,
+            phone: formData.phone || '',
+            cpf: formData.cpf || '',
+            address: formData.address || '',
+            displayName: formData.displayName,
+          }),
         });
         toast.success('Usuário atualizado com sucesso!');
       } else {
-        // Pre-registration: Use email as temporary ID or a random one if we don't have UID yet
-        // For Google Auth, we usually wait for them to login, but we can pre-set roles by email
-        // We'll use a special collection or just add to 'users' with a flag
-        const normalizedEmail = (formData.email || '').toLowerCase();
-        const userQuery = users.find(u => u.email?.toLowerCase() === normalizedEmail);
-        if (userQuery) {
-          toast.error('Este e-mail já está cadastrado.');
-          return;
-        }
-
-        // We'll create a document with a random ID if it's a new invite,
-        // but our useAuth hook needs to be updated to look for email-based pre-configs.
-        // For simplicity in this demo, we'll just add to the users collection.
-        const newId = `invite_${Date.now()}`;
-        await setDoc(doc(db, 'users', newId), {
-          ...formData,
-          email: normalizedEmail,
-          phone: formData.phone || '',
-          cpf: formData.cpf || '',
-          address: formData.address || '',
-          uid: newId,
-          createdAt: new Date().toISOString(),
-          isInvite: true
+        await apiFetch('/api/users', {
+          method: 'POST',
+          body: JSON.stringify(formData),
         });
         toast.success('Convite/Pré-cadastro realizado!');
       }
@@ -79,8 +65,10 @@ export default function Users() {
       setEditingUser(null);
       setConfirmSave(false);
       setFormData({ email: '', displayName: '', role: 'tenant', phone: '', cpf: '', address: '' });
+      await fetchUsers();
     } catch (error) {
-      handleFirestoreError(error, editingUser ? OperationType.UPDATE : OperationType.CREATE, editingUser ? `users/${editingUser.uid}` : 'users');
+      console.error('Failed to save user:', error);
+      toast.error(error instanceof ApiError ? error.message : 'Erro ao salvar usuário.');
     }
   };
 

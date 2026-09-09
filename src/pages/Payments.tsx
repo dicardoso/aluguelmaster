@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, collection, addDoc, updateDoc, doc, onSnapshot, query, where, handleFirestoreError, OperationType } from '../firebase';
+import { apiFetch } from '../lib/api';
 import { Payment, Contract, UserProfile, Property } from '../types';
 import { CreditCard, CheckCircle, Clock, AlertCircle, Download, Plus, X, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
@@ -36,54 +36,31 @@ export default function Payments() {
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
+  const fetchPayments = useCallback(async () => {
+    try {
+      setPayments(await apiFetch<Payment[]>('/api/payments'));
+    } catch (error) {
+      console.error('Failed to load payments:', error);
+      toast.error('Erro ao carregar pagamentos.');
+    }
+  }, []);
+
   useEffect(() => {
     if (!profile) return;
 
-    const qPayments = isAdmin 
-      ? collection(db, 'payments') 
-      : isTenant 
-        ? query(collection(db, 'payments'), where('tenantUid', '==', profile.uid))
-        : collection(db, 'payments'); // Landlords see all
-    
-    const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
-      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'payments');
+    fetchPayments();
+    apiFetch<Contract[]>('/api/contracts').then(setContracts).catch((error) => {
+      console.error('Failed to load contracts:', error);
     });
-
-    const qContracts = isAdmin 
-      ? collection(db, 'contracts') 
-      : isTenant 
-        ? query(collection(db, 'contracts'), where('tenantUid', '==', profile.uid))
-        : query(collection(db, 'contracts'), where('landlordUid', '==', profile.uid));
-
-    const unsubscribeContracts = onSnapshot(qContracts, (snapshot) => {
-      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contract)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contracts');
+    apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
+      setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+    }).catch((error) => {
+      console.error('Failed to load users directory:', error);
     });
-
-    const qUsers = collection(db, 'users');
-    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
-      setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'users');
+    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
+      console.error('Failed to load properties:', error);
     });
-
-    const qProperties = collection(db, 'properties');
-    const unsubscribeProperties = onSnapshot(qProperties, (snapshot) => {
-      setProperties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'properties');
-    });
-
-    return () => {
-      unsubscribePayments();
-      unsubscribeContracts();
-      unsubscribeUsers();
-      unsubscribeProperties();
-    };
-  }, [profile, isAdmin, isLandlord, isTenant]);
+  }, [profile, fetchPayments]);
 
   const handleMarkAsPaid = async () => {
     if (!confirmPaid.payment) return;
@@ -98,15 +75,17 @@ export default function Payments() {
         selectedDate.setHours(12, 0, 0); // Noon as default for other days
       }
 
-      await updateDoc(doc(db, 'payments', confirmPaid.payment.id), {
-        status: 'paid',
-        paidAt: selectedDate.toISOString(),
+      await apiFetch(`/api/payments/${confirmPaid.payment.id}/mark-paid`, {
+        method: 'PATCH',
+        body: JSON.stringify({ paidAt: selectedDate.toISOString() }),
       });
       toast.success('Pagamento baixado com sucesso!');
       setConfirmPaid({ show: false, payment: null });
       setPaymentDate(format(new Date(), 'yyyy-MM-dd'));
+      await fetchPayments();
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `payments/${confirmPaid.payment.id}`);
+      console.error('Failed to mark payment as paid:', error);
+      toast.error('Erro ao dar baixa no pagamento.');
     }
   };
 
@@ -222,17 +201,17 @@ export default function Payments() {
       const contract = contracts.find(c => c.id === formData.contractId);
       if (!contract) return;
 
-      const data = { 
-        ...formData, 
-        tenantUid: contract.tenantUid,
-        status: 'pending' 
-      };
-      await addDoc(collection(db, 'payments'), data);
+      await apiFetch('/api/payments', {
+        method: 'POST',
+        body: JSON.stringify({ contractId: formData.contractId, amount: formData.amount, dueDate: formData.dueDate }),
+      });
       toast.success('Cobrança gerada com sucesso!');
       setIsModalOpen(false);
       setConfirmGenerate(false);
+      await fetchPayments();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'payments');
+      console.error('Failed to create payment:', error);
+      toast.error('Erro ao gerar cobrança.');
     }
   };
 

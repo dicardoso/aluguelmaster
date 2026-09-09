@@ -1,0 +1,143 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  landlord
+  tenant
+}
+
+enum Theme {
+  light
+  dark
+  system
+}
+
+enum PropertyType {
+  residential
+  commercial
+}
+
+enum PropertyStatus {
+  available
+  rented
+  maintenance
+}
+
+enum ContractStatus {
+  active
+  expired
+  terminated
+  pending
+  renewed
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  paid
+  overdue
+}
+
+model User {
+  id              String   @id // Firebase uid, or "invite_<timestamp>" for a pre-registration placeholder
+  email           String   @unique
+  displayName     String
+  role            Role     @default(tenant)
+  phone           String?
+  cpf             String?
+  address         String?
+  themePreference Theme    @default(system)
+  isInvite        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  propertiesOwned     Property[] @relation("PropertyOwner")
+  contractsAsLandlord Contract[] @relation("ContractLandlord")
+  contractsAsTenant   Contract[] @relation("ContractTenant")
+  payments            Payment[]
+
+  @@map("users")
+}
+
+model Property {
+  id          String         @id @default(cuid())
+  address     String
+  type        PropertyType
+  description String
+  ownerUid    String
+  owner       User           @relation("PropertyOwner", fields: [ownerUid], references: [id])
+  monthlyRent Decimal        @db.Decimal(10, 2)
+  status      PropertyStatus @default(available)
+
+  contracts Contract[]
+
+  @@index([ownerUid])
+  @@map("properties")
+}
+
+model Contract {
+  id                String         @id @default(cuid())
+  propertyId        String
+  property          Property       @relation(fields: [propertyId], references: [id])
+  landlordUid       String
+  landlord          User           @relation("ContractLandlord", fields: [landlordUid], references: [id])
+  tenantUid         String
+  tenant            User           @relation("ContractTenant", fields: [tenantUid], references: [id])
+  startDate         DateTime       @db.Date
+  endDate           DateTime       @db.Date
+  dueDay            Int            @default(10)
+  monthlyRent       Decimal        @db.Decimal(10, 2)
+  status            ContractStatus @default(pending)
+  pdfUrl            String?
+  signedAt          DateTime?
+  signedContractUrl String?
+  reminderSentAt    DateTime?
+  createdAt         DateTime       @default(now())
+
+  payments Payment[]
+
+  @@index([propertyId])
+  @@index([landlordUid])
+  @@index([tenantUid])
+  @@map("contracts")
+}
+
+model Payment {
+  id         String        @id @default(cuid())
+  contractId String
+  contract   Contract      @relation(fields: [contractId], references: [id])
+  tenantUid  String
+  tenant     User          @relation(fields: [tenantUid], references: [id])
+  amount     Decimal       @db.Decimal(10, 2)
+  dueDate    DateTime      @db.Date
+  paidAt     DateTime?
+  status     PaymentStatus @default(pending)
+  receiptUrl String?
+  reminderSentAt DateTime?
+  createdAt  DateTime      @default(now())
+
+  @@index([contractId])
+  @@index([tenantUid])
+  @@map("payments")
+}
+
+model Settings {
+  id                     String   @id @default("global")
+  appName                String   @default("AluguelMaster")
+  companyName            String?
+  supportEmail           String?
+  smtpHost               String?
+  smtpPort               Int?
+  smtpUser               String?
+  smtpPasswordEncrypted  String? // server-only — never returned to the client, plain or encrypted
+  emailFrom              String?
+  updatedAt              DateTime @updatedAt
+
+  @@map("settings")
+}

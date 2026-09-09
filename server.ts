@@ -1,11 +1,18 @@
+import "dotenv/config";
 import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
-import nodemailer from "nodemailer";
 import admin from "firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
-import CryptoJS from "crypto-js";
+import meRouter from "./src/server/routes/me";
+import propertiesRouter from "./src/server/routes/properties";
+import contractsRouter from "./src/server/routes/contracts";
+import paymentsRouter from "./src/server/routes/payments";
+import usersRouter from "./src/server/routes/users";
+import settingsRouter from "./src/server/routes/settings";
+import { prisma } from "./src/server/prisma";
+import { sendMail } from "./src/server/mailer";
+import { requireAuth, loadProfile, requireRole } from "./src/server/auth";
 
 async function startServer() {
   const app = express();
@@ -13,7 +20,7 @@ async function startServer() {
 
   app.use(express.json());
 
-  // Initialize Firebase Admin
+  // Initialize Firebase Admin (still needed to verify Google Sign-In ID tokens)
   const configPath = path.join(process.cwd(), "firebase-applet-config.json");
   let firebaseConfig: any = {};
   if (fs.existsSync(configPath)) {
@@ -26,90 +33,34 @@ async function startServer() {
     });
   }
 
-  const db = getFirestore(firebaseConfig.firestoreDatabaseId);
-
-  // Email transporter (lazy initialization)
-  let transporter: nodemailer.Transporter | null = null;
-
-  const getTransporter = async () => {
-    if (!transporter) {
-      // Fetch settings from Firestore
-      const settingsDoc = await db.collection('settings').doc('global').get();
-      const settings = settingsDoc.data();
-      
-      if (!settings) {
-        console.warn("No settings found in Firestore.");
-        return null;
-      }
-
-      const { smtpHost, smtpPort, smtpUser, smtpPassword } = settings;
-
-      if (!smtpHost || !smtpPort || !smtpUser || !smtpPassword) {
-        console.warn("SMTP credentials not fully configured in Firestore settings. Emails will be logged to console only.");
-        return null;
-      }
-
-      // Decrypt password
-      const ENCRYPTION_KEY = process.env.VITE_ENCRYPTION_KEY || 'default-secret-key-12345';
-      let decryptedPassword = smtpPassword;
-      try {
-        const bytes = CryptoJS.AES.decrypt(smtpPassword, ENCRYPTION_KEY);
-        decryptedPassword = bytes.toString(CryptoJS.enc.Utf8);
-      } catch (error) {
-        console.error('Error decrypting SMTP password:', error);
-      }
-
-      transporter = nodemailer.createTransport({
-        host: smtpHost,
-        port: parseInt(smtpPort),
-        secure: parseInt(smtpPort) === 465,
-        auth: {
-          user: smtpUser,
-          pass: decryptedPassword,
-        },
-      });
-    }
-    return transporter;
-  };
+  app.use('/api/me', meRouter);
+  app.use('/api/properties', propertiesRouter);
+  app.use('/api/contracts', contractsRouter);
+  app.use('/api/payments', paymentsRouter);
+  app.use('/api/users', usersRouter);
+  app.use('/api/settings', settingsRouter);
 
   // API routes
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok" });
   });
 
-  app.post("/api/email/contract-notification", async (req, res) => {
+  app.post("/api/email/contract-notification", requireAuth, loadProfile, async (req, res) => {
     const { to, subject, body } = req.body;
-    const mailOptions = {
-      from: process.env.SMTP_FROM || "no-reply@gestaoimobiliaria.com",
-      to,
-      subject,
-      html: body,
-    };
-
-    const mailTransporter = await getTransporter();
-    if (mailTransporter) {
-      try {
-        await mailTransporter.sendMail(mailOptions);
-        res.json({ success: true, message: "Email sent successfully" });
-      } catch (error) {
-        console.error("Error sending email:", error);
-        res.status(500).json({ success: false, error: "Failed to send email" });
-      }
-    } else {
-      console.log("SIMULATED EMAIL SENT:");
-      console.log("To:", to);
-      console.log("Subject:", subject);
-      console.log("Body:", body);
-      res.json({ success: true, message: "Email simulated (check server logs)" });
+    try {
+      await sendMail({ to, subject, html: body });
+      res.json({ success: true, message: "Email sent successfully" });
+    } catch (error) {
+      console.error("Error sending email:", error);
+      res.status(500).json({ success: false, error: "Failed to send email" });
     }
   });
 
-  app.post("/api/reminders/process", async (req, res) => {
+  app.post("/api/reminders/process", requireAuth, loadProfile, requireRole('admin'), async (req, res) => {
     try {
       const now = new Date();
-      
-      const settingsDoc = await db.collection('settings').doc('global').get();
-      const settings = settingsDoc.data();
+
+      const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
       const appName = settings?.appName || 'Equipe AluguelMaster';
       const thirtyDaysFromNow = new Date();
       thirtyDaysFromNow.setDate(now.getDate() + 30);
@@ -124,21 +75,16 @@ async function startServer() {
       };
 
       // 1. Process Contracts (Expiring in 30 days)
-      const contractsSnapshot = await db.collection('contracts')
-        .where('status', '==', 'active')
-        .get();
+      const activeContracts = await prisma.contract.findMany({ where: { status: 'active' } });
 
-      for (const doc of contractsSnapshot.docs) {
-        const contract = doc.data();
-        const endDate = new Date(contract.endDate);
+      for (const contract of activeContracts) {
+        const endDate = contract.endDate;
 
         // If expiring in less than 30 days and no reminder sent in last 30 days
         if (endDate <= thirtyDaysFromNow && endDate > now) {
-          const lastReminder = contract.reminderSentAt ? new Date(contract.reminderSentAt) : null;
+          const lastReminder = contract.reminderSentAt;
           if (!lastReminder || (now.getTime() - lastReminder.getTime() > 25 * 24 * 60 * 60 * 1000)) {
-            // Send email to landlord and tenant
-            const tenantDoc = await db.collection('users').doc(contract.tenantUid).get();
-            const tenant = tenantDoc.data();
+            const tenant = await prisma.user.findUnique({ where: { id: contract.tenantUid } });
 
             if (tenant?.email) {
               const subject = `Lembrete: Seu contrato está próximo do vencimento`;
@@ -150,21 +96,13 @@ async function startServer() {
                 <p>Atenciosamente,<br/>${appName}</p>
               `;
 
-              const mailTransporter = await getTransporter();
-              const mailOptions = {
-                from: process.env.SMTP_FROM || "no-reply@gestaoimobiliaria.com",
-                to: tenant.email,
-                subject,
-                html: body,
-              };
-
-              if (mailTransporter) {
-                await mailTransporter.sendMail(mailOptions);
-              } else {
-                console.log("SIMULATED REMINDER EMAIL (Contract):", tenant.email);
+              try {
+                await sendMail({ to: tenant.email, subject, html: body });
+              } catch (error) {
+                console.error('Failed to send contract reminder:', error);
               }
 
-              await doc.ref.update({ reminderSentAt: now.toISOString() });
+              await prisma.contract.update({ where: { id: contract.id }, data: { reminderSentAt: now } });
               results.contracts++;
             }
           }
@@ -172,21 +110,17 @@ async function startServer() {
       }
 
       // 2. Process Payments (Due in 3 days or Overdue)
-      const paymentsSnapshot = await db.collection('payments')
-        .where('status', 'in', ['pending', 'overdue'])
-        .get();
+      const duePayments = await prisma.payment.findMany({ where: { status: { in: ['pending', 'overdue'] } } });
 
-      for (const doc of paymentsSnapshot.docs) {
-        const payment = doc.data();
-        const dueDate = new Date(payment.dueDate);
+      for (const payment of duePayments) {
+        const dueDate = payment.dueDate;
 
         // If due in less than 3 days or already overdue
         if (dueDate <= threeDaysFromNow) {
-          const lastReminder = payment.reminderSentAt ? new Date(payment.reminderSentAt) : null;
+          const lastReminder = payment.reminderSentAt;
           // Send reminder if none sent today
           if (!lastReminder || (now.toDateString() !== lastReminder.toDateString())) {
-            const tenantDoc = await db.collection('users').doc(payment.tenantUid).get();
-            const tenant = tenantDoc.data();
+            const tenant = await prisma.user.findUnique({ where: { id: payment.tenantUid } });
 
             if (tenant?.email) {
               const isOverdue = dueDate < now;
@@ -196,7 +130,7 @@ async function startServer() {
 
               const body = `
                 <h2>Olá ${tenant.displayName},</h2>
-                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>R$ ${payment.amount.toLocaleString('pt-BR')}</b>.</p>
+                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>R$ ${Number(payment.amount).toLocaleString('pt-BR')}</b>.</p>
                 <p>Data de vencimento: <b>${dueDate.toLocaleDateString('pt-BR')}</b>.</p>
                 ${isOverdue ? '<p style="color: red; font-weight: bold;">Seu pagamento está ATRASADO. Por favor, regularize o quanto antes.</p>' : ''}
                 <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
@@ -204,21 +138,13 @@ async function startServer() {
                 <p>Atenciosamente,<br/>${appName}</p>
               `;
 
-              const mailTransporter = await getTransporter();
-              const mailOptions = {
-                from: process.env.SMTP_FROM || "no-reply@gestaoimobiliaria.com",
-                to: tenant.email,
-                subject,
-                html: body,
-              };
-
-              if (mailTransporter) {
-                await mailTransporter.sendMail(mailOptions);
-              } else {
-                console.log("SIMULATED REMINDER EMAIL (Payment):", tenant.email);
+              try {
+                await sendMail({ to: tenant.email, subject, html: body });
+              } catch (error) {
+                console.error('Failed to send payment reminder:', error);
               }
 
-              await doc.ref.update({ reminderSentAt: now.toISOString() });
+              await prisma.payment.update({ where: { id: payment.id }, data: { reminderSentAt: now } });
               results.payments++;
             }
           }

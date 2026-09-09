@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, collection, query, where, onSnapshot, handleFirestoreError, OperationType } from '../firebase';
+import { apiFetch } from '../lib/api';
 import { Property, Contract, Payment } from '../types';
 import { Building2, FileText, CreditCard, AlertCircle, TrendingUp, Users } from 'lucide-react';
 import { format, isAfter, isBefore, addDays } from 'date-fns';
@@ -8,7 +8,7 @@ import { ptBR } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 
 export default function Dashboard() {
-  const { profile, isAdmin, isLandlord, isTenant } = useAuth();
+  const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -16,46 +16,16 @@ export default function Dashboard() {
   useEffect(() => {
     if (!profile) return;
 
-    const qProperties = isAdmin 
-      ? collection(db, 'properties') 
-      : query(collection(db, 'properties'), where('ownerUid', '==', profile.uid));
-    
-    const unsubscribeProperties = onSnapshot(qProperties, (snapshot) => {
-      setProperties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'properties');
+    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
+      console.error('Failed to load properties:', error);
     });
-
-    const qContracts = isAdmin 
-      ? collection(db, 'contracts') 
-      : isTenant 
-        ? query(collection(db, 'contracts'), where('tenantUid', '==', profile.uid))
-        : query(collection(db, 'contracts'), where('landlordUid', '==', profile.uid));
-
-    const unsubscribeContracts = onSnapshot(qContracts, (snapshot) => {
-      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contract)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contracts');
+    apiFetch<Contract[]>('/api/contracts').then(setContracts).catch((error) => {
+      console.error('Failed to load contracts:', error);
     });
-
-    const qPayments = isAdmin 
-      ? collection(db, 'payments') 
-      : isTenant 
-        ? query(collection(db, 'payments'), where('tenantUid', '==', profile.uid))
-        : collection(db, 'payments'); // Landlords see all for now, filter in memory if needed
-
-    const unsubscribePayments = onSnapshot(qPayments, (snapshot) => {
-      setPayments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'payments');
+    apiFetch<Payment[]>('/api/payments').then(setPayments).catch((error) => {
+      console.error('Failed to load payments:', error);
     });
-
-    return () => {
-      unsubscribeProperties();
-      unsubscribeContracts();
-      unsubscribePayments();
-    };
-  }, [profile, isAdmin, isLandlord, isTenant]);
+  }, [profile]);
 
   const stats = [
     { name: 'Imóveis', value: properties.length, icon: Building2, color: 'text-blue-600', bg: 'bg-blue-100' },

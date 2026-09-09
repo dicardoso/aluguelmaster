@@ -1,18 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, collection, addDoc, updateDoc, doc, onSnapshot, query, where, handleFirestoreError, OperationType, storage } from '../firebase';
+import { storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { apiFetch } from '../lib/api';
 import { Contract, Property, UserProfile, Payment } from '../types';
 import { FileText, Plus, Download, RefreshCw, X, Calendar, User, Building2, Mail, XCircle, Upload, CheckCircle2, History, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { format, addMonths, parseISO, differenceInMonths } from 'date-fns';
+import { format, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 export default function Contracts() {
-  const { profile, isAdmin, isLandlord, isTenant } = useAuth();
+  const { profile, isAdmin, isLandlord } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -33,47 +34,28 @@ export default function Contracts() {
     status: 'pending',
   });
 
+  const fetchContracts = useCallback(async () => {
+    try {
+      setContracts(await apiFetch<Contract[]>('/api/contracts'));
+    } catch (error) {
+      console.error('Failed to load contracts:', error);
+      toast.error('Erro ao carregar contratos.');
+    }
+  }, []);
+
   useEffect(() => {
     if (!profile) return;
 
-    // Contracts
-    const qContracts = isAdmin 
-      ? collection(db, 'contracts') 
-      : isTenant 
-        ? query(collection(db, 'contracts'), where('tenantUid', '==', profile.uid))
-        : query(collection(db, 'contracts'), where('landlordUid', '==', profile.uid));
-    
-    const unsubscribeContracts = onSnapshot(qContracts, (snapshot) => {
-      setContracts(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Contract)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'contracts');
+    fetchContracts();
+    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
+      console.error('Failed to load properties:', error);
     });
-
-    // Properties (for selection)
-    const qProperties = isAdmin 
-      ? collection(db, 'properties') 
-      : query(collection(db, 'properties'), where('ownerUid', '==', profile.uid));
-    
-    const unsubscribeProperties = onSnapshot(qProperties, (snapshot) => {
-      setProperties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'properties');
+    apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
+      setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+    }).catch((error) => {
+      console.error('Failed to load users directory:', error);
     });
-
-    // Users (for selection and PDF generation)
-    const qUsers = collection(db, 'users');
-    const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
-      setUsers(snapshot.docs.map(doc => ({ uid: doc.id, ...doc.data() } as UserProfile)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'users');
-    });
-
-    return () => {
-      unsubscribeContracts();
-      unsubscribeProperties();
-      unsubscribeUsers();
-    };
-  }, [profile, isAdmin, isLandlord, isTenant]);
+  }, [profile, fetchContracts]);
 
   useEffect(() => {
     if (!selectedContractForHistory) {
@@ -81,19 +63,13 @@ export default function Contracts() {
       return;
     }
 
-    const q = query(
-      collection(db, 'payments'),
-      where('contractId', '==', selectedContractForHistory.id)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const p = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Payment));
-      setContractPayments(p.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime()));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'payments');
-    });
-
-    return () => unsubscribe();
+    apiFetch<Payment[]>(`/api/payments?contractId=${selectedContractForHistory.id}`)
+      .then((data) => {
+        setContractPayments(data.sort((a, b) => new Date(b.dueDate).getTime() - new Date(a.dueDate).getTime()));
+      })
+      .catch((error) => {
+        console.error('Failed to load contract payments:', error);
+      });
   }, [selectedContractForHistory]);
 
   const generatePDF = (contract: Contract) => {
@@ -258,138 +234,34 @@ export default function Contracts() {
     toast.success('PDF gerado com sucesso!');
   };
 
-  const createPaymentsForContract = async (contract: Contract) => {
-    const start = parseISO(contract.startDate);
-    const end = parseISO(contract.endDate);
-    const fullMonths = differenceInMonths(end, start);
-    // Include a final partial-month payment when the term doesn't end on an exact month boundary
-    const months = addMonths(start, fullMonths) < end ? fullMonths + 1 : fullMonths;
-
-    const paymentPromises = [];
-    for (let i = 0; i < months; i++) {
-      const dueDate = addMonths(start, i);
-      // Set due day to the contract's due day
-      dueDate.setDate(contract.dueDay || 10);
-      
-      paymentPromises.push(addDoc(collection(db, 'payments'), {
-        contractId: contract.id,
-        tenantUid: contract.tenantUid,
-        landlordUid: contract.landlordUid,
-        amount: contract.monthlyRent,
-        dueDate: format(dueDate, 'yyyy-MM-dd'),
-        status: 'pending',
-        createdAt: new Date().toISOString()
-      }));
-    }
-    await Promise.all(paymentPromises);
-  };
-
-  const sendContractEmail = async (contract: Contract, type: 'new' | 'renew') => {
-    const tenant = users.find(u => u.uid === contract.tenantUid);
-    const property = properties.find(p => p.id === contract.propertyId);
-    
-    if (!tenant?.email) return;
-
-    const subject = type === 'new' 
-      ? `Novo Contrato de Locação - ${property?.address}`
-      : `Renovação de Contrato de Locação - ${property?.address}`;
-
-    const body = `
-      <h1>Olá ${tenant.displayName},</h1>
-      <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${type === 'new' ? 'gerado' : 'renovado'} com sucesso.</p>
-      <p><strong>Detalhes:</strong></p>
-      <ul>
-        <li>Valor Mensal: R$ ${contract.monthlyRent.toLocaleString('pt-BR')}</li>
-        <li>Vencimento: Todo dia ${contract.dueDay || 10}</li>
-        <li>Período: ${format(parseISO(contract.startDate), 'dd/MM/yyyy')} até ${format(parseISO(contract.endDate), 'dd/MM/yyyy')}</li>
-      </ul>
-      <p>Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.</p>
-      <p>Atenciosamente,<br>Gestão Imobiliária</p>
-    `;
-
-    try {
-      const response = await fetch('/api/email/contract-notification', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: tenant.email, subject, body }),
-      });
-      const result = await response.json();
-      if (result.success) {
-        toast.success('E-mail de notificação enviado!');
-      } else {
-        toast.error('Contrato criado, mas erro ao enviar e-mail.');
-      }
-    } catch (error) {
-      console.error('Email error:', error);
-      toast.error('Erro de conexão ao enviar e-mail.');
-    }
-  };
+  // Payment-schedule generation, contract-renewal bookkeeping and the notification
+  // email now all happen server-side (see src/server/routes/contracts.ts) — the
+  // client just calls the endpoint and refetches.
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
 
     try {
-      const data = { 
-        ...formData, 
-        status: 'active',
-        createdAt: new Date().toISOString()
-      };
-      const docRef = await addDoc(collection(db, 'contracts'), data);
-      const contractWithId = { id: docRef.id, ...data } as Contract;
-      
-      // Update property status to rented
-      if (formData.propertyId) {
-        await updateDoc(doc(db, 'properties', formData.propertyId), { status: 'rented' });
-      }
-
-      // Create payments
-      await createPaymentsForContract(contractWithId);
-
-      // Send email
-      await sendContractEmail(contractWithId, 'new');
-
+      await apiFetch('/api/contracts', { method: 'POST', body: JSON.stringify(formData) });
       toast.success('Contrato e cobranças gerados com sucesso!');
       setIsModalOpen(false);
+      await Promise.all([fetchContracts(), apiFetch<Property[]>('/api/properties').then(setProperties)]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'contracts');
+      console.error('Failed to create contract:', error);
+      toast.error('Erro ao criar contrato.');
     }
   };
 
   const handleRenew = async () => {
     if (!contractToRenew) return;
     try {
-      const newStartDate = contractToRenew.endDate;
-      const newEndDate = format(addMonths(parseISO(contractToRenew.endDate), 12), 'yyyy-MM-dd');
-      
-      const newContractData = {
-        ...contractToRenew,
-        startDate: newStartDate,
-        endDate: newEndDate,
-        status: 'active',
-        createdAt: new Date().toISOString()
-      };
-      delete (newContractData as any).id;
-      // A renewed contract is a new, unsigned document — don't carry over the old signature/PDF
-      delete (newContractData as any).pdfUrl;
-      delete (newContractData as any).signedAt;
-      delete (newContractData as any).signedContractUrl;
-      
-      const docRef = await addDoc(collection(db, 'contracts'), newContractData);
-      const newContract = { id: docRef.id, ...newContractData } as Contract;
-
-      // Mark old contract as renewed/expired
-      await updateDoc(doc(db, 'contracts', contractToRenew.id), { status: 'renewed' });
-
-      // Create payments for the new period
-      await createPaymentsForContract(newContract);
-
-      // Send email
-      await sendContractEmail(newContract, 'renew');
-
+      await apiFetch(`/api/contracts/${contractToRenew.id}/renew`, { method: 'POST' });
       toast.success('Contrato renovado e novas cobranças geradas!');
+      await fetchContracts();
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, 'contracts');
+      console.error('Failed to renew contract:', error);
+      toast.error('Erro ao renovar contrato.');
     } finally {
       setContractToRenew(null);
     }
@@ -398,15 +270,12 @@ export default function Contracts() {
   const handleCancel = async () => {
     if (!contractToCancel) return;
     try {
-      await updateDoc(doc(db, 'contracts', contractToCancel.id), { status: 'cancelled' });
-      
-      if (contractToCancel.propertyId) {
-        await updateDoc(doc(db, 'properties', contractToCancel.propertyId), { status: 'available' });
-      }
-
+      await apiFetch(`/api/contracts/${contractToCancel.id}/cancel`, { method: 'POST' });
       toast.success('Contrato cancelado com sucesso!');
+      await Promise.all([fetchContracts(), apiFetch<Property[]>('/api/properties').then(setProperties)]);
     } catch (error) {
-      handleFirestoreError(error, OperationType.UPDATE, `contracts/${contractToCancel.id}`);
+      console.error('Failed to cancel contract:', error);
+      toast.error('Erro ao cancelar contrato.');
     } finally {
       setContractToCancel(null);
     }
@@ -433,16 +302,17 @@ export default function Contracts() {
     try {
       const fileExt = file.name.split('.').pop();
       const storageRef = ref(storage, `contracts/${contractId}/signed_contract_${Date.now()}.${fileExt}`);
-      
+
       await uploadBytes(storageRef, file);
       const downloadUrl = await getDownloadURL(storageRef);
 
-      await updateDoc(doc(db, 'contracts', contractId), {
-        signedContractUrl: downloadUrl,
-        signedAt: new Date().toISOString()
+      await apiFetch(`/api/contracts/${contractId}/signed`, {
+        method: 'PATCH',
+        body: JSON.stringify({ signedContractUrl: downloadUrl }),
       });
 
       toast.success('Contrato assinado anexado com sucesso!');
+      await fetchContracts();
     } catch (error) {
       console.error('Error uploading file:', error);
       toast.error('Erro ao fazer upload do arquivo.');
@@ -585,7 +455,14 @@ export default function Contracts() {
                         {(isAdmin || isLandlord) && contract.status === 'active' && (
                           <>
                             <button
-                              onClick={() => sendContractEmail(contract, 'new')}
+                              onClick={() => {
+                                apiFetch(`/api/contracts/${contract.id}/notify`, { method: 'POST' })
+                                  .then(() => toast.success('E-mail de notificação enviado!'))
+                                  .catch((error) => {
+                                    console.error('Failed to resend contract email:', error);
+                                    toast.error('Erro ao enviar e-mail.');
+                                  });
+                              }}
                               className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
                               title="Reenviar E-mail"
                             >
@@ -764,7 +641,7 @@ export default function Contracts() {
                 >
                   <option value="">Selecione um locador</option>
                   {users.filter(u => u.role === 'landlord').map(l => (
-                    <option key={l.uid} value={l.uid}>{l.displayName} ({l.email})</option>
+                    <option key={l.uid} value={l.uid}>{l.displayName}</option>
                   ))}
                 </select>
               </div>
@@ -778,7 +655,7 @@ export default function Contracts() {
                 >
                   <option value="">Selecione um inquilino</option>
                   {users.filter(u => u.role === 'tenant').map(t => (
-                    <option key={t.uid} value={t.uid}>{t.displayName} ({t.email})</option>
+                    <option key={t.uid} value={t.uid}>{t.displayName}</option>
                   ))}
                 </select>
               </div>

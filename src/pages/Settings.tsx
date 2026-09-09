@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, doc, getDoc, setDoc, handleFirestoreError, OperationType } from '../firebase';
+import { apiFetch } from '../lib/api';
 import { AppSettings } from '../types';
 import { Settings as SettingsIcon, Save, Mail, Building, Server } from 'lucide-react';
 import { toast } from 'sonner';
-import { encryptData, decryptData } from '../lib/encryption';
 
 export default function Settings() {
   const { isAdmin } = useAuth();
@@ -25,18 +24,11 @@ export default function Settings() {
     const fetchSettings = async () => {
       if (!isAdmin) return;
       try {
-        const docRef = doc(db, 'settings', 'global');
-        const docSnap = await getDoc(docRef);
-        
-        if (docSnap.exists()) {
-          const data = docSnap.data() as AppSettings;
-          if (data.smtpPassword) {
-            data.smtpPassword = decryptData(data.smtpPassword);
-          }
-          setFormData(data);
-        }
+        const data = await apiFetch<AppSettings>('/api/settings');
+        setFormData({ ...data, smtpPassword: '' });
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, 'settings/global');
+        console.error('Failed to load settings:', error);
+        toast.error('Erro ao carregar configurações.');
       } finally {
         setLoading(false);
       }
@@ -51,16 +43,18 @@ export default function Settings() {
 
     setSaving(true);
     try {
-      const dataToSave = {
-        ...formData,
-        smtpPassword: formData.smtpPassword ? encryptData(formData.smtpPassword) : '',
-        updatedAt: new Date().toISOString()
-      };
-      
-      await setDoc(doc(db, 'settings', 'global'), dataToSave);
+      // Blank smtpPassword means "leave the stored one unchanged" — the server
+      // never sends the real password back, so there's nothing to re-encrypt here.
+      const { smtpPasswordConfigured, ...rest } = formData;
+      const data = await apiFetch<AppSettings>('/api/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ ...rest, smtpPassword: formData.smtpPassword || undefined }),
+      });
+      setFormData({ ...data, smtpPassword: '' });
       toast.success('Configurações salvas com sucesso!');
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'settings/global');
+      console.error('Failed to save settings:', error);
+      toast.error('Erro ao salvar configurações.');
     } finally {
       setSaving(false);
     }
@@ -200,8 +194,9 @@ export default function Settings() {
                 value={formData.smtpPassword}
                 onChange={(e) => setFormData({ ...formData, smtpPassword: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                placeholder="••••••••••••••••"
+                placeholder={formData.smtpPasswordConfigured ? 'Já configurada — preencha para trocar' : '••••••••••••••••'}
               />
+              {/* The server never sends the real password back — it stays server-only. Leave blank to keep it unchanged. */}
             </div>
           </div>
         </div>

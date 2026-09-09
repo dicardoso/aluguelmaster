@@ -11,6 +11,7 @@ import Users from './pages/Users';
 import Login from './pages/Login';
 import Settings from './pages/Settings';
 import { useEffect } from 'react';
+import { apiFetch } from './lib/api';
 
 const ReminderTrigger = () => {
   const { isAdmin, user } = useAuth();
@@ -21,8 +22,7 @@ const ReminderTrigger = () => {
       const today = new Date().toDateString();
 
       if (lastCheck !== today) {
-        fetch('/api/reminders/process', { method: 'POST' })
-          .then(res => res.json())
+        apiFetch<{ success: boolean; results: unknown }>('/api/reminders/process', { method: 'POST' })
           .then(data => {
             if (data.success) {
               console.log('Reminders processed:', data.results);
@@ -46,7 +46,7 @@ const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
 
 export default function App() {
   return (
-    <AuthProvider>
+    <AuthProvider children={undefined}>
       <ReminderTrigger />
       <Router>
         <Routes>
@@ -54,8 +54,8 @@ export default function App() {
           <Route
             path="/*"
             element={
-              <ProtectedRoute>
-                <Layout>
+              <ProtectedRoute children={undefined}>
+                <Layout children={undefined}>
                   <Routes>
                     <Route path="/" element={<Dashboard />} />
                     <Route path="/properties" element={<Properties />} />

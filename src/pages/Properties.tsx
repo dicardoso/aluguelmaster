@@ -1,13 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { db, collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, where, handleFirestoreError, OperationType } from '../firebase';
+import { apiFetch } from '../lib/api';
 import { Property } from '../types';
 import { Building2, Plus, Edit2, Trash2, X, Home, Briefcase, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../components/ConfirmModal';
 
 export default function Properties() {
-  const { profile, isAdmin, isLandlord } = useAuth();
+  const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   
   // Filters and Pagination
@@ -28,48 +28,52 @@ export default function Properties() {
     status: 'available',
   });
 
+  const fetchProperties = useCallback(async () => {
+    try {
+      const data = await apiFetch<Property[]>('/api/properties');
+      setProperties(data);
+    } catch (error) {
+      console.error('Failed to load properties:', error);
+      toast.error('Erro ao carregar imóveis.');
+    }
+  }, []);
+
   useEffect(() => {
     if (!profile) return;
-    const q = isAdmin 
-      ? collection(db, 'properties') 
-      : query(collection(db, 'properties'), where('ownerUid', '==', profile.uid));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      setProperties(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Property)));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'properties');
-    });
-    return () => unsubscribe();
-  }, [profile, isAdmin]);
+    fetchProperties();
+  }, [profile, fetchProperties]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!profile) return;
 
     try {
-      const data = { ...formData, ownerUid: profile.uid };
       if (editingProperty) {
-        await updateDoc(doc(db, 'properties', editingProperty.id), data);
+        await apiFetch(`/api/properties/${editingProperty.id}`, { method: 'PATCH', body: JSON.stringify(formData) });
         toast.success('Imóvel atualizado com sucesso!');
       } else {
-        await addDoc(collection(db, 'properties'), data);
+        await apiFetch('/api/properties', { method: 'POST', body: JSON.stringify(formData) });
         toast.success('Imóvel cadastrado com sucesso!');
       }
       setIsModalOpen(false);
       setEditingProperty(null);
       setFormData({ address: '', type: 'residential', description: '', monthlyRent: 0, status: 'available' });
+      await fetchProperties();
     } catch (error) {
-      handleFirestoreError(error, editingProperty ? OperationType.UPDATE : OperationType.CREATE, editingProperty ? `properties/${editingProperty.id}` : 'properties');
+      console.error('Failed to save property:', error);
+      toast.error('Erro ao salvar imóvel.');
     }
   };
 
   const handleDelete = async () => {
     if (!propertyToDelete) return;
     try {
-      await deleteDoc(doc(db, 'properties', propertyToDelete));
+      await apiFetch(`/api/properties/${propertyToDelete}`, { method: 'DELETE' });
       toast.success('Imóvel excluído com sucesso!');
+      await fetchProperties();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, `properties/${propertyToDelete}`);
+      console.error('Failed to delete property:', error);
+      toast.error('Erro ao excluir imóvel.');
     } finally {
       setPropertyToDelete(null);
     }

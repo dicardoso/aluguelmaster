@@ -57,6 +57,7 @@ export interface AppSettings {
   smtpPort: number;
   smtpUser: string;
   smtpPassword?: string;
+  smtpPasswordConfigured?: boolean;
   emailFrom: string;
   updatedAt?: string;
 }
