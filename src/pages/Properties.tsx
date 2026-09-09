@@ -5,11 +5,13 @@ import { Property } from '../types';
 import { Building2, Plus, Edit2, Trash2, X, Home, Briefcase, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../components/ConfirmModal';
+import PageLoader from '../components/PageLoader';
 
 export default function Properties() {
   const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
-  
+  const [loading, setLoading] = useState(true);
+
   // Filters and Pagination
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -40,7 +42,7 @@ export default function Properties() {
 
   useEffect(() => {
     if (!profile) return;
-    fetchProperties();
+    fetchProperties().finally(() => setLoading(false));
   }, [profile, fetchProperties]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -94,6 +96,8 @@ export default function Properties() {
 
   const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
   const paginatedProperties = filteredProperties.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

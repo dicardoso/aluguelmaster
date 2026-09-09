@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { prisma } from '../prisma';
-import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth';
+import { requireAuth, loadProfile, requireRole, invalidateProfileCache, AuthedRequest } from '../auth';
 
 const router = Router();
 
@@ -67,6 +67,7 @@ router.patch('/:id', requireRole('admin'), async (req: AuthedRequest, res) => {
       ...(address !== undefined && { address }),
     },
   });
+  invalidateProfileCache(updated.id);
   res.json(updated);
 });
 

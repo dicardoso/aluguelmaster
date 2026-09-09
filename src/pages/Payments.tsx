@@ -9,6 +9,7 @@ import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
+import PageLoader from '../components/PageLoader';
 
 export default function Payments() {
   const { profile, isAdmin, isLandlord, isTenant } = useAuth();
@@ -16,7 +17,8 @@ export default function Payments() {
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
-  
+  const [loading, setLoading] = useState(true);
+
   // Filters and Pagination
   const [filterStatus, setFilterStatus] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
@@ -48,17 +50,16 @@ export default function Payments() {
   useEffect(() => {
     if (!profile) return;
 
-    fetchPayments();
-    apiFetch<Contract[]>('/api/contracts').then(setContracts).catch((error) => {
-      console.error('Failed to load contracts:', error);
-    });
-    apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
-      setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
-    }).catch((error) => {
-      console.error('Failed to load users directory:', error);
-    });
-    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
-      console.error('Failed to load properties:', error);
+    Promise.allSettled([
+      fetchPayments(),
+      apiFetch<Contract[]>('/api/contracts').then(setContracts),
+      apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
+        setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+      }),
+      apiFetch<Property[]>('/api/properties').then(setProperties),
+    ]).then((results) => {
+      results.forEach((r) => r.status === 'rejected' && console.error('Failed to load payments page data:', r.reason));
+      setLoading(false);
     });
   }, [profile, fetchPayments]);
 
@@ -214,6 +215,8 @@ export default function Payments() {
       toast.error('Erro ao gerar cobrança.');
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

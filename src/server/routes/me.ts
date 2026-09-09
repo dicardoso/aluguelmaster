@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Theme } from '@prisma/client';
 import { prisma } from '../prisma';
-import { requireAuth, loadProfile, AuthedRequest } from '../auth';
+import { requireAuth, loadProfile, invalidateProfileCache, AuthedRequest } from '../auth';
 
 const router = Router();
 
@@ -35,6 +35,7 @@ router.patch('/', async (req: AuthedRequest, res) => {
     },
   });
 
+  invalidateProfileCache(updated.id);
   res.json(updated);
 });
 

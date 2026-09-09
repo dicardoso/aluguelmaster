@@ -9,7 +9,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+async function doFetch<T>(path: string, options: RequestInit): Promise<T> {
   const idToken = await auth.currentUser?.getIdToken();
 
   const response = await fetch(path, {
@@ -31,4 +31,25 @@ export async function apiFetch<T = any>(path: string, options: RequestInit = {})
   }
 
   return response.json();
+}
+
+// Concurrent identical GETs (e.g. two pages both loading /api/properties, or React
+// StrictMode's dev-only double effect invocation) share one network call instead of
+// firing twice — mutations are never deduped, only reads.
+const inFlightGets = new Map<string, Promise<any>>();
+
+export function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  const method = (options.method ?? 'GET').toUpperCase();
+  if (method !== 'GET') {
+    return doFetch<T>(path, options);
+  }
+
+  const existing = inFlightGets.get(path);
+  if (existing) return existing;
+
+  const promise = doFetch<T>(path, options).finally(() => {
+    inFlightGets.delete(path);
+  });
+  inFlightGets.set(path, promise);
+  return promise;
 }

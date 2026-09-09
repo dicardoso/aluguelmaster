@@ -32,6 +32,17 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
   }
 }
 
+// Every authenticated request needs the caller's profile (for role checks), which would
+// otherwise mean a Postgres round-trip on top of the route's own query for every single
+// API call. Profiles change rarely, so a short-lived in-memory cache avoids that — safe
+// because this runs as a single Node process, not multiple instances behind a load balancer.
+const PROFILE_CACHE_TTL_MS = 30_000;
+const profileCache = new Map<string, { profile: User; expiresAt: number }>();
+
+export function invalidateProfileCache(uid: string) {
+  profileCache.delete(uid);
+}
+
 // Loads (or bootstraps) the caller's Postgres profile. Mirrors the logic that used to live in
 // useAuth.tsx: migrate a pre-registered invite by email, or create a default tenant profile.
 export async function loadProfile(req: AuthedRequest, res: Response, next: NextFunction) {
@@ -42,6 +53,13 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
 
   const { uid, email, displayName } = req.firebaseUser;
   const normalizedEmail = (email ?? '').toLowerCase();
+
+  const cached = profileCache.get(uid);
+  if (cached && cached.expiresAt > Date.now()) {
+    req.profile = cached.profile;
+    next();
+    return;
+  }
 
   let profile = await prisma.user.findUnique({ where: { id: uid } });
 
@@ -86,6 +104,7 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
   }
 
   req.profile = profile;
+  profileCache.set(uid, { profile, expiresAt: Date.now() + PROFILE_CACHE_TTL_MS });
   next();
 }
 

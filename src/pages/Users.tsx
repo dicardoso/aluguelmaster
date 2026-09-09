@@ -5,10 +5,12 @@ import { UserProfile, UserRole } from '../types';
 import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../components/ConfirmModal';
+import PageLoader from '../components/PageLoader';
 
 export default function Users() {
   const { profile, isAdmin } = useAuth();
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserProfile | null>(null);
   const [formData, setFormData] = useState<Partial<UserProfile>>({
@@ -34,7 +36,7 @@ export default function Users() {
 
   useEffect(() => {
     if (!profile || !isAdmin) return;
-    fetchUsers();
+    fetchUsers().finally(() => setLoading(false));
   }, [profile, isAdmin, fetchUsers]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
@@ -81,6 +83,8 @@ export default function Users() {
       </div>
     );
   }
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">

@@ -6,24 +6,25 @@ import { Building2, FileText, CreditCard, AlertCircle, TrendingUp, Users } from 
 import { format, isAfter, isBefore, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
+import PageLoader from '../components/PageLoader';
 
 export default function Dashboard() {
   const { profile } = useAuth();
   const [properties, setProperties] = useState<Property[]>([]);
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!profile) return;
 
-    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
-      console.error('Failed to load properties:', error);
-    });
-    apiFetch<Contract[]>('/api/contracts').then(setContracts).catch((error) => {
-      console.error('Failed to load contracts:', error);
-    });
-    apiFetch<Payment[]>('/api/payments').then(setPayments).catch((error) => {
-      console.error('Failed to load payments:', error);
+    Promise.allSettled([
+      apiFetch<Property[]>('/api/properties').then(setProperties),
+      apiFetch<Contract[]>('/api/contracts').then(setContracts),
+      apiFetch<Payment[]>('/api/payments').then(setPayments),
+    ]).then((results) => {
+      results.forEach((r) => r.status === 'rejected' && console.error('Failed to load dashboard data:', r.reason));
+      setLoading(false);
     });
   }, [profile]);
 
@@ -75,6 +76,8 @@ export default function Dashboard() {
 
     setNotifications(newNotifications);
   }, [contracts, payments]);
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-8">

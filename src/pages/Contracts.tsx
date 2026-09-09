@@ -11,12 +11,14 @@ import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
+import PageLoader from '../components/PageLoader';
 
 export default function Contracts() {
   const { profile, isAdmin, isLandlord } = useAuth();
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [contractToRenew, setContractToRenew] = useState<Contract | null>(null);
   const [contractToCancel, setContractToCancel] = useState<Contract | null>(null);
@@ -46,14 +48,15 @@ export default function Contracts() {
   useEffect(() => {
     if (!profile) return;
 
-    fetchContracts();
-    apiFetch<Property[]>('/api/properties').then(setProperties).catch((error) => {
-      console.error('Failed to load properties:', error);
-    });
-    apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
-      setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
-    }).catch((error) => {
-      console.error('Failed to load users directory:', error);
+    Promise.allSettled([
+      fetchContracts(),
+      apiFetch<Property[]>('/api/properties').then(setProperties),
+      apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
+        setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+      }),
+    ]).then((results) => {
+      results.forEach((r) => r.status === 'rejected' && console.error('Failed to load contracts page data:', r.reason));
+      setLoading(false);
     });
   }, [profile, fetchContracts]);
 
@@ -322,6 +325,8 @@ export default function Contracts() {
       e.target.value = '';
     }
   };
+
+  if (loading) return <PageLoader />;
 
   return (
     <div className="space-y-6">
