@@ -1,8 +1,8 @@
 import type { Request, Response, NextFunction } from 'express';
 import admin from 'firebase-admin';
 import { Role, User } from '@prisma/client';
-import { prisma } from './prisma';
-import { sendWelcomeEmail } from './mailer';
+import { prisma } from './prisma.js';
+import { sendWelcomeEmail } from './mailer.js';
 
 export interface AuthedRequest extends Request {
   firebaseUser?: { uid: string; email: string | null; displayName: string | null };

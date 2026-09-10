@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import CryptoJS from 'crypto-js';
-import { prisma } from '../prisma';
-import { requireAuth, loadProfile, requireRole } from '../auth';
+import { prisma } from '../prisma.js';
+import { requireAuth, loadProfile, requireRole } from '../auth.js';
 
 const router = Router();
 

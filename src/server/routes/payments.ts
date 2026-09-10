@@ -1,7 +1,7 @@
 import { Router } from 'express';
-import { prisma } from '../prisma';
-import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth';
-import { serializePayment } from '../serialize';
+import { prisma } from '../prisma.js';
+import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js';
+import { serializePayment } from '../serialize.js';
 
 const router = Router();
 

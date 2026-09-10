@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { prisma } from '../prisma';
-import { requireAuth, loadProfile, requireRole, invalidateProfileCache, AuthedRequest } from '../auth';
+import { prisma } from '../prisma.js';
+import { requireAuth, loadProfile, requireRole, invalidateProfileCache, AuthedRequest } from '../auth.js';
 
 const router = Router();
 

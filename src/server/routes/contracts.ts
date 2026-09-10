@@ -1,10 +1,10 @@
 import { Router } from 'express';
 import { Prisma } from '@prisma/client';
-import { prisma } from '../prisma';
-import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth';
-import { serializeContract } from '../serialize';
-import { sendMail } from '../mailer';
-import { formatCurrency } from '../../lib/format';
+import { prisma } from '../prisma.js';
+import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js';
+import { serializeContract } from '../serialize.js';
+import { sendMail } from '../mailer.js';
+import { formatCurrency } from '../../lib/format.js';
 
 const router = Router();
 

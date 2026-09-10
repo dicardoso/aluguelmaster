@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { Theme } from '@prisma/client';
-import { prisma } from '../prisma';
-import { requireAuth, loadProfile, invalidateProfileCache, AuthedRequest } from '../auth';
+import { prisma } from '../prisma.js';
+import { requireAuth, loadProfile, invalidateProfileCache, AuthedRequest } from '../auth.js';
 
 const router = Router();
 

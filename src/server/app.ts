@@ -2,16 +2,16 @@ import express from "express";
 import admin from "firebase-admin";
 import fs from "fs";
 import path from "path";
-import meRouter from "./routes/me";
-import propertiesRouter from "./routes/properties";
-import contractsRouter from "./routes/contracts";
-import paymentsRouter from "./routes/payments";
-import usersRouter from "./routes/users";
-import settingsRouter from "./routes/settings";
-import { prisma } from "./prisma";
-import { sendMail } from "./mailer";
-import { requireAuth, loadProfile, requireRole } from "./auth";
-import { formatCurrency } from "../lib/format";
+import meRouter from "./routes/me.js";
+import propertiesRouter from "./routes/properties.js";
+import contractsRouter from "./routes/contracts.js";
+import paymentsRouter from "./routes/payments.js";
+import usersRouter from "./routes/users.js";
+import settingsRouter from "./routes/settings.js";
+import { prisma } from "./prisma.js";
+import { sendMail } from "./mailer.js";
+import { requireAuth, loadProfile, requireRole } from "./auth.js";
+import { formatCurrency } from "../lib/format.js";
 
 // Builds the Express app with every /api route wired up, independent of how the
 // process is hosted (a long-lived `app.listen()` in local dev, or a single

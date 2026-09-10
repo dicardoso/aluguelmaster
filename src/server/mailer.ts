@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 import CryptoJS from 'crypto-js';
-import { prisma } from './prisma';
+import { prisma } from './prisma.js';
 
 let transporter: nodemailer.Transporter | null = null;
 let transporterCacheKey = '';
