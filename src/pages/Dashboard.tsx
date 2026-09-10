@@ -7,7 +7,7 @@ import { Building2, FileText, CreditCard, AlertCircle, TrendingUp, Users, Chevro
 import { format, isAfter, isBefore, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import PageLoader from '../components/PageLoader';
+import DashboardSkeleton from '../components/DashboardSkeleton';
 import { formatCurrency } from '../lib/format';
 
 const NOTIFICATIONS_COLLAPSED_LIMIT = 3;
@@ -111,7 +111,7 @@ export default function Dashboard() {
   const expiringCount = notifications.filter(n => n.type === 'warning').length;
   const visibleNotifications = showAllNotifications ? notifications : notifications.slice(0, NOTIFICATIONS_COLLAPSED_LIMIT);
 
-  if (loading) return <PageLoader />;
+  if (loading) return <DashboardSkeleton />;
 
   return (
     <div className="space-y-8">

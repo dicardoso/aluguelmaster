@@ -11,6 +11,7 @@ import Users from './pages/Users';
 import Login from './pages/Login';
 import Settings from './pages/Settings';
 import Profile from './pages/Profile';
+import BrandLoader from './components/BrandLoader';
 import { useEffect } from 'react';
 import { apiFetch } from './lib/api';
 
@@ -40,7 +41,7 @@ const ReminderTrigger = () => {
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { user, loading } = useAuth();
-  if (loading) return <div className="flex h-screen items-center justify-center">Carregando...</div>;
+  if (loading) return <BrandLoader />;
   if (!user) return <Navigate to="/login" />;
   return <>{children}</>;
 };

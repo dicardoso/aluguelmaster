@@ -11,3 +11,14 @@
 body {
   @apply font-sans text-gray-900 bg-gray-50 dark:bg-gray-900 dark:text-gray-100 antialiased transition-colors duration-200;
 }
+
+/* BrandLoader (src/components/BrandLoader.tsx) — the two animations Tailwind's
+   built-ins (animate-pulse / animate-ping) don't cover. */
+@keyframes brand-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(420%); }
+}
+@keyframes brand-window {
+  0%, 100% { opacity: .18; }
+  40% { opacity: 1; }
+}

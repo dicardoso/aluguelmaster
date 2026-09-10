@@ -13,7 +13,7 @@ import { ptBR } from 'date-fns/locale';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
-import PageLoader from '../components/PageLoader';
+import ContractsTableSkeleton from '../components/ContractsTableSkeleton';
 
 export default function Contracts() {
   const { profile, isAdmin, isLandlord } = useAuth();
@@ -368,7 +368,7 @@ export default function Contracts() {
   const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
   const paginatedContracts = filteredContracts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  if (loading) return <PageLoader />;
+  if (loading) return <ContractsTableSkeleton />;
 
   return (
     <div className="space-y-6">
