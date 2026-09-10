@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../lib/api';
 import { Property, Contract, Payment } from '../types';
-import { Building2, FileText, CreditCard, AlertCircle, TrendingUp, Users } from 'lucide-react';
+import { Building2, FileText, CreditCard, AlertCircle, TrendingUp, Users, ChevronDown, ChevronUp, ChevronRight } from 'lucide-react';
 import { format, isAfter, isBefore, addDays } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import PageLoader from '../components/PageLoader';
+import { formatCurrency } from '../lib/format';
+
+const NOTIFICATIONS_COLLAPSED_LIMIT = 3;
 
 export default function Dashboard() {
   const { profile } = useAuth();
@@ -39,20 +42,36 @@ export default function Dashboard() {
     }).length, icon: AlertCircle, color: 'text-red-600', bg: 'bg-red-100' },
   ];
 
+  const now = new Date();
+  const currentMonthPayments = payments.filter(p => {
+    const due = new Date(p.dueDate);
+    return due.getFullYear() === now.getFullYear() && due.getMonth() === now.getMonth();
+  });
+  const getEffectivePaymentStatus = (p: Payment): Payment['status'] =>
+    p.status === 'pending' && new Date(p.dueDate) < now ? 'overdue' : p.status;
+
   const chartData = [
-    { name: 'Pago', value: payments.filter(p => p.status === 'paid').length },
-    { name: 'Pendente', value: payments.filter(p => p.status === 'pending').length },
-    { name: 'Atrasado', value: payments.filter(p => p.status === 'overdue').length },
+    { name: 'Pago', value: currentMonthPayments.filter(p => getEffectivePaymentStatus(p) === 'paid').length },
+    { name: 'Pendente', value: currentMonthPayments.filter(p => getEffectivePaymentStatus(p) === 'pending').length },
+    { name: 'Atrasado', value: currentMonthPayments.filter(p => getEffectivePaymentStatus(p) === 'overdue').length },
   ];
 
   const COLORS = ['#10B981', '#F59E0B', '#EF4444'];
 
-  const [notifications, setNotifications] = useState<{ id: string; title: string; type: 'warning' | 'error'; path: string }[]>([]);
+  interface DashboardNotification {
+    id: string;
+    title: string;
+    type: 'warning' | 'error';
+    path: string;
+    sortDate: number;
+  }
+
+  const [notifications, setNotifications] = useState<DashboardNotification[]>([]);
+  const [showAllNotifications, setShowAllNotifications] = useState(false);
 
   useEffect(() => {
-    const newNotifications: { id: string; title: string; type: 'warning' | 'error'; path: string }[] = [];
+    const newNotifications: DashboardNotification[] = [];
 
-    // Check expiring contracts
     contracts.forEach(c => {
       const expiry = new Date(c.endDate);
       if (isAfter(expiry, new Date()) && isBefore(expiry, addDays(new Date(), 30))) {
@@ -61,24 +80,36 @@ export default function Dashboard() {
           title: `Contrato #${c.id.slice(0, 6)} vence em ${format(expiry, 'dd/MM/yyyy')}`,
           type: 'warning',
           path: '/contracts',
+          sortDate: expiry.getTime(),
         });
       }
     });
 
-    // Check overdue payments
     payments.forEach(p => {
       if (p.status === 'pending' && isBefore(new Date(p.dueDate), new Date())) {
+        const dueDate = new Date(p.dueDate);
         newNotifications.push({
           id: `payment-${p.id}`,
-          title: `Pagamento de R$ ${p.amount} está atrasado (Vencimento: ${format(new Date(p.dueDate), 'dd/MM/yyyy')})`,
+          title: `Pagamento de ${formatCurrency(p.amount)} está atrasado (Vencimento: ${format(dueDate, 'dd/MM/yyyy')})`,
           type: 'error',
           path: '/payments',
+          sortDate: dueDate.getTime(),
         });
       }
+    });
+
+    newNotifications.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'error' ? -1 : 1;
+      return a.sortDate - b.sortDate;
     });
 
     setNotifications(newNotifications);
+    setShowAllNotifications(false);
   }, [contracts, payments]);
+
+  const overdueCount = notifications.filter(n => n.type === 'error').length;
+  const expiringCount = notifications.filter(n => n.type === 'warning').length;
+  const visibleNotifications = showAllNotifications ? notifications : notifications.slice(0, NOTIFICATIONS_COLLAPSED_LIMIT);
 
   if (loading) return <PageLoader />;
 
@@ -93,19 +124,44 @@ export default function Dashboard() {
 
       {/* Notifications */}
       {notifications.length > 0 && (
-        <div className="space-y-3">
-          {notifications.map(notif => (
-            <Link
-              key={notif.id}
-              to={notif.path}
-              className={`p-4 rounded-xl border flex items-center gap-3 transition-colors hover:brightness-95 dark:hover:brightness-110 ${
-                notif.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30 text-red-700 dark:text-red-400' : 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30 text-orange-700 dark:text-orange-400'
-              }`}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div className="px-5 py-3 bg-red-50/60 dark:bg-red-900/10 border-b border-gray-100 dark:border-gray-700 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-200">
+              {notifications.length} {notifications.length === 1 ? 'alerta' : 'alertas'}
+              {overdueCount > 0 && <span className="text-red-600 dark:text-red-400"> · {overdueCount} atrasado{overdueCount > 1 ? 's' : ''}</span>}
+              {expiringCount > 0 && <span className="text-orange-600 dark:text-orange-400"> · {expiringCount} vencendo</span>}
+            </p>
+          </div>
+
+          <div className="divide-y divide-gray-50 dark:divide-gray-700/50">
+            {visibleNotifications.map(notif => (
+              <Link
+                key={notif.id}
+                to={notif.path}
+                className="px-5 py-3 flex items-center gap-3 hover:bg-gray-50 dark:hover:bg-gray-700/30 transition-colors group"
+              >
+                <span className={`w-2 h-2 rounded-full shrink-0 ${notif.type === 'error' ? 'bg-red-500' : 'bg-orange-500'}`} />
+                <p className={`text-sm flex-1 truncate ${notif.type === 'error' ? 'text-red-700 dark:text-red-400' : 'text-orange-700 dark:text-orange-400'}`}>
+                  {notif.title}
+                </p>
+                <ChevronRight className="w-4 h-4 text-gray-300 dark:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity shrink-0" />
+              </Link>
+            ))}
+          </div>
+
+          {notifications.length > NOTIFICATIONS_COLLAPSED_LIMIT && (
+            <button
+              onClick={() => setShowAllNotifications(v => !v)}
+              className="w-full px-5 py-2.5 flex items-center justify-center gap-1.5 text-xs font-semibold text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700/30 border-t border-gray-100 dark:border-gray-700 transition-colors"
             >
-              <AlertCircle className="w-5 h-5" />
-              <p className="text-sm font-medium">{notif.title}</p>
-            </Link>
-          ))}
+              {showAllNotifications ? (
+                <>Mostrar menos <ChevronUp className="w-3.5 h-3.5" /></>
+              ) : (
+                <>Mostrar mais {notifications.length - NOTIFICATIONS_COLLAPSED_LIMIT} <ChevronDown className="w-3.5 h-3.5" /></>
+              )}
+            </button>
+          )}
         </div>
       )}
 
@@ -128,10 +184,13 @@ export default function Dashboard() {
         {/* Chart */}
         <div className="bg-white dark:bg-gray-800 p-6 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm">
           <div className="flex items-center justify-between mb-8">
-            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
-              <TrendingUp className="w-5 h-5 text-blue-600" />
-              Fluxo de Caixa
-            </h3>
+            <div>
+              <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                <TrendingUp className="w-5 h-5 text-blue-600" />
+                Fluxo de Caixa
+              </h3>
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">{format(now, "MMMM 'de' yyyy", { locale: ptBR })}</p>
+            </div>
             <div className="flex items-center gap-2">
               <span className="flex items-center gap-1 text-xs text-gray-500"><div className="w-2 h-2 rounded-full bg-green-500" /> Pago</span>
               <span className="flex items-center gap-1 text-xs text-gray-500"><div className="w-2 h-2 rounded-full bg-orange-500" /> Pendente</span>
