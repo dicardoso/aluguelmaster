@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../lib/api';
+import { formatCurrency } from '../lib/format';
 import { Property } from '../types';
 import { Building2, Plus, Edit2, Trash2, X, Home, Briefcase, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
@@ -176,7 +177,7 @@ export default function Properties() {
                 <div className="flex flex-col">
                   <p className="text-[10px] uppercase font-bold text-gray-400 dark:text-gray-500 tracking-wider">Aluguel</p>
                   <p className="text-lg font-mono font-bold text-blue-600 dark:text-blue-400">
-                    R$ {property.monthlyRent.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    {formatCurrency(property.monthlyRent)}
                   </p>
                 </div>
                 <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">

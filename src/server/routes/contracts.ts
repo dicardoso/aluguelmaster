@@ -4,6 +4,7 @@ import { prisma } from '../prisma';
 import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth';
 import { serializeContract } from '../serialize';
 import { sendMail } from '../mailer';
+import { formatCurrency } from '../../lib/format';
 
 const router = Router();
 
@@ -68,7 +69,7 @@ async function sendContractEmail(contract: { propertyId: string; tenantUid: stri
     <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${type === 'new' ? 'gerado' : 'renovado'} com sucesso.</p>
     <p><strong>Detalhes:</strong></p>
     <ul>
-      <li>Valor Mensal: R$ ${Number(contract.monthlyRent).toLocaleString('pt-BR')}</li>
+      <li>Valor Mensal: ${formatCurrency(Number(contract.monthlyRent))}</li>
       <li>Vencimento: Todo dia ${contract.dueDay || 10}</li>
       <li>Período: ${contract.startDate.toISOString().slice(0, 10).split('-').reverse().join('/')} até ${contract.endDate.toISOString().slice(0, 10).split('-').reverse().join('/')}</li>
     </ul>
@@ -84,7 +85,7 @@ async function sendContractEmail(contract: { propertyId: string; tenantUid: stri
 }
 
 router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
-  const { propertyId, tenantUid, landlordUid, startDate, endDate, dueDay, monthlyRent } = req.body ?? {};
+  const { propertyId, tenantUid, landlordUid, startDate, endDate, dueDay, monthlyRent, lateFeeEnabled } = req.body ?? {};
 
   if (!propertyId || !tenantUid || !startDate || !endDate || monthlyRent === undefined) {
     res.status(400).json({ error: 'Missing required fields' });
@@ -114,6 +115,7 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
         dueDay: dueDay || 10,
         monthlyRent,
         status: 'active',
+        lateFeeEnabled: !!lateFeeEnabled,
       },
     });
     await tx.property.update({ where: { id: propertyId }, data: { status: 'rented' } });
@@ -160,6 +162,7 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
         dueDay: existing.dueDay,
         monthlyRent: existing.monthlyRent,
         status: 'active',
+        lateFeeEnabled: existing.lateFeeEnabled,
         // Deliberately not copied: pdfUrl / signedAt / signedContractUrl — a renewed
         // contract is a new, unsigned document (a bug in the old Firestore version).
       },
@@ -198,6 +201,23 @@ router.post('/:id/notify', requireRole('admin', 'landlord'), async (req: AuthedR
     console.error('Failed to resend contract email:', error);
     res.status(500).json({ success: false, error: 'Failed to send email' });
   }
+});
+
+router.patch('/:id/late-fee', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
+  const existing = await loadAccessibleContract(req, res);
+  if (!existing) return;
+
+  const { lateFeeEnabled } = req.body ?? {};
+  if (typeof lateFeeEnabled !== 'boolean') {
+    res.status(400).json({ error: 'lateFeeEnabled must be a boolean' });
+    return;
+  }
+
+  const updated = await prisma.contract.update({
+    where: { id: existing.id },
+    data: { lateFeeEnabled },
+  });
+  res.json(serializeContract(updated));
 });
 
 // Called after the client uploads the signed file straight to Firebase Storage —

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../lib/api';
+import { formatCurrency } from '../lib/format';
+import { calculateLateFee } from '../lib/lateFee';
 import { Payment, Contract, UserProfile, Property } from '../types';
-import { CreditCard, CheckCircle, Clock, AlertCircle, Download, Plus, X, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CreditCard, CheckCircle, Clock, AlertCircle, Download, Plus, X, Search, Filter, ChevronLeft, ChevronRight, FileDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -37,6 +39,11 @@ export default function Payments() {
   const [confirmPaid, setConfirmPaid] = useState<{ show: boolean; payment: Payment | null }>({ show: false, payment: null });
   const [confirmGenerate, setConfirmGenerate] = useState(false);
   const [paymentDate, setPaymentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+
+  // Bulk mark-as-paid
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [confirmBulkPaid, setConfirmBulkPaid] = useState(false);
+  const [bulkSaving, setBulkSaving] = useState(false);
 
   const fetchPayments = useCallback(async () => {
     try {
@@ -90,6 +97,66 @@ export default function Payments() {
     }
   };
 
+  const handleBulkMarkAsPaid = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkSaving(true);
+    const now = new Date().toISOString();
+    const results = await Promise.allSettled(
+      Array.from(selectedIds).map((id) =>
+        apiFetch(`/api/payments/${id}/mark-paid`, { method: 'PATCH', body: JSON.stringify({ paidAt: now }) })
+      )
+    );
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    if (failed > 0) {
+      toast.error(`${failed} pagamento(s) não puderam ser baixados.`);
+    }
+    if (failed < results.length) {
+      toast.success(`${results.length - failed} pagamento(s) baixado(s) com sucesso!`);
+    }
+    setSelectedIds(new Set());
+    setConfirmBulkPaid(false);
+    setBulkSaving(false);
+    await fetchPayments();
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const exportCsv = () => {
+    const header = ['ID', 'Inquilino', 'Imóvel', 'Valor', 'Vencimento', 'Status', 'Data do Pagamento'];
+    const rows = filteredPayments.map((payment) => {
+      const tenant = users.find(u => u.uid === payment.tenantUid);
+      const contract = contracts.find(c => c.id === payment.contractId);
+      const property = properties.find(p => p.id === contract?.propertyId);
+      const status = getEffectiveStatus(payment);
+      return [
+        payment.id,
+        tenant?.displayName || '',
+        property?.address || '',
+        payment.amount.toFixed(2).replace('.', ','),
+        payment.dueDate,
+        status === 'paid' ? 'Pago' : status === 'overdue' ? 'Atrasado' : 'Aguardando',
+        payment.paidAt ? format(parseISO(payment.paidAt), 'dd/MM/yyyy') : '',
+      ];
+    });
+    const csv = [header, ...rows]
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(';'))
+      .join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `pagamentos_${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
   const generateReceipt = (payment: Payment) => {
     const contract = contracts.find(c => c.id === payment.contractId);
     const tenant = users.find(u => u.uid === payment.tenantUid);
@@ -130,7 +197,13 @@ export default function Payments() {
 
     yPos = (doc as any).lastAutoTable.finalY + 10;
 
-    // Payment Details
+    // Payment Details — if the contract has automatic late fees enabled and this
+    // payment was actually settled after its due date, show the multa/juros breakdown
+    // that would have applied (computed, never stored).
+    const feeApplies = !!contract?.lateFeeEnabled && !!payment.paidAt;
+    const fee = feeApplies ? calculateLateFee(payment.amount, payment.dueDate, parseISO(payment.paidAt!)) : null;
+    const totalReceived = fee && fee.daysLate > 0 ? fee.total : payment.amount;
+
     autoTable(doc, {
       startY: yPos,
       margin: { left: margin, right: margin },
@@ -139,7 +212,13 @@ export default function Payments() {
       body: [
         ['Vencimento', format(parseISO(payment.dueDate), 'dd/MM/yyyy')],
         ['Data do Pagamento', payment.paidAt ? format(parseISO(payment.paidAt), 'dd/MM/yyyy HH:mm') : 'N/A'],
-        ['Valor Pago', `R$ ${payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+        ['Valor do Aluguel', formatCurrency(payment.amount)],
+        ...(fee && fee.daysLate > 0
+          ? [
+              ['Multa (2%) + Juros de Mora', formatCurrency(fee.fine + fee.interest)],
+              ['Valor Total Recebido', formatCurrency(fee.total)],
+            ]
+          : []),
         ['Status', payment.status === 'paid' ? 'PAGO' : 'PENDENTE'],
       ],
     });
@@ -149,7 +228,7 @@ export default function Payments() {
     // Declaration
     doc.setFontSize(11);
     doc.setTextColor(60, 60, 60);
-    const declaration = `Recebi(emos) de ${tenant?.displayName || 'N/A'}, a importância de R$ ${payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, referente ao aluguel do imóvel situado à ${property?.address || 'N/A'}, com vencimento em ${format(parseISO(payment.dueDate), 'dd/MM/yyyy')}.`;
+    const declaration = `Recebi(emos) de ${tenant?.displayName || 'N/A'}, a importância de ${formatCurrency(totalReceived)}, referente ao aluguel do imóvel situado à ${property?.address || 'N/A'}, com vencimento em ${format(parseISO(payment.dueDate), 'dd/MM/yyyy')}.`;
     const lines = doc.splitTextToSize(declaration, pageWidth - 2 * margin);
     doc.text(lines, margin, yPos);
 
@@ -167,9 +246,10 @@ export default function Payments() {
     toast.success('Comprovante gerado com sucesso!');
   };
 
-  // Reset page when filters change
+  // Reset page and selection when filters change
   useEffect(() => {
     setCurrentPage(1);
+    setSelectedIds(new Set());
   }, [filterStatus, searchQuery]);
 
   const getEffectiveStatus = (payment: Payment): Payment['status'] =>
@@ -225,15 +305,24 @@ export default function Payments() {
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Pagamentos</h2>
           <p className="text-gray-500 dark:text-gray-400">Controle financeiro e baixa de mensalidades.</p>
         </div>
-        {(isAdmin || isLandlord) && (
+        <div className="flex items-center gap-2">
           <button
-            onClick={() => setIsModalOpen(true)}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+            onClick={exportCsv}
+            className="flex items-center gap-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 px-4 py-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors shadow-sm"
           >
-            <Plus className="w-5 h-5" />
-            Gerar Cobrança
+            <FileDown className="w-4 h-4" />
+            Exportar CSV
           </button>
-        )}
+          {(isAdmin || isLandlord) && (
+            <button
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+            >
+              <Plus className="w-5 h-5" />
+              Gerar Cobrança
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters and Search */}
@@ -263,16 +352,46 @@ export default function Payments() {
         </div>
       </div>
 
+      {/* Bulk actions bar */}
+      {(isAdmin || isLandlord) && selectedIds.size > 0 && (
+        <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-xl px-4 py-3">
+          <p className="text-sm font-medium text-blue-700 dark:text-blue-400">{selectedIds.size} pagamento(s) selecionado(s)</p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSelectedIds(new Set())}
+              className="px-3 py-1.5 text-sm text-blue-700 dark:text-blue-400 hover:underline"
+            >
+              Limpar seleção
+            </button>
+            <button
+              onClick={() => setConfirmBulkPaid(true)}
+              className="px-4 py-1.5 bg-emerald-600 text-white text-sm font-semibold rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
+            >
+              Dar Baixa em Massa
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4">
         {paginatedPayments.map((payment) => {
           const tenant = users.find(u => u.uid === payment.tenantUid);
           const contract = contracts.find(c => c.id === payment.contractId);
           const property = properties.find(p => p.id === contract?.propertyId);
           const status = getEffectiveStatus(payment);
+          const canSelect = (isAdmin || isLandlord) && status !== 'paid';
 
           return (
             <div key={payment.id} className="bg-white dark:bg-gray-800 p-6 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4 group hover:border-blue-100 dark:hover:border-blue-900 transition-colors">
               <div className="flex items-center gap-4">
+                {canSelect && (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(payment.id)}
+                    onChange={() => toggleSelected(payment.id)}
+                    className="w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 shrink-0"
+                  />
+                )}
                 <div className={`w-12 h-12 rounded-xl flex items-center justify-center shrink-0 ${
                   status === 'paid' ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400' :
                   status === 'overdue' ? 'bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400' : 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400'
@@ -284,10 +403,18 @@ export default function Payments() {
                   <div className="flex items-center gap-2">
                     <p className="text-sm font-bold text-gray-900 dark:text-white">Mensalidade</p>
                     <span className="text-xs font-mono text-gray-500 dark:text-gray-400 bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">
-                      R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      {formatCurrency(payment.amount)}
                     </span>
                   </div>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">Vencimento: {format(parseISO(payment.dueDate), 'dd/MM/yyyy')}</p>
+                  {status === 'overdue' && contract?.lateFeeEnabled && (() => {
+                    const fee = calculateLateFee(payment.amount, payment.dueDate);
+                    return (
+                      <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                        + multa/juros: {formatCurrency(fee.fine + fee.interest)} (total {formatCurrency(fee.total)})
+                      </p>
+                    );
+                  })()}
                   {(isAdmin || isLandlord) && tenant && (
                     <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 font-medium">Inquilino: {tenant.displayName}</p>
                   )}
@@ -436,7 +563,7 @@ export default function Payments() {
         onCancel={() => setConfirmPaid({ show: false, payment: null })}
         onConfirm={handleMarkAsPaid}
         title="Confirmar Pagamento"
-        message={`Deseja realmente marcar este pagamento de R$ ${confirmPaid.payment?.amount.toLocaleString('pt-BR')} como PAGO?`}
+        message={`Deseja realmente marcar este pagamento de ${confirmPaid.payment ? formatCurrency(confirmPaid.payment.amount) : ''} como PAGO?`}
         confirmText="Confirmar"
       >
         <div className="mt-4">
@@ -457,6 +584,15 @@ export default function Payments() {
         title="Confirmar Nova Cobrança"
         message="Deseja realmente gerar esta nova cobrança para o contrato selecionado?"
         confirmText="Gerar Cobrança"
+      />
+
+      <ConfirmModal
+        isOpen={confirmBulkPaid}
+        onCancel={() => setConfirmBulkPaid(false)}
+        onConfirm={handleBulkMarkAsPaid}
+        title="Confirmar Baixa em Massa"
+        message={`Deseja marcar ${selectedIds.size} pagamento(s) como PAGO na data de hoje? Esta ação não pode ser desfeita individualmente.`}
+        confirmText={bulkSaving ? 'Processando...' : 'Confirmar'}
       />
     </div>
   );

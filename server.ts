@@ -13,6 +13,7 @@ import settingsRouter from "./src/server/routes/settings";
 import { prisma } from "./src/server/prisma";
 import { sendMail } from "./src/server/mailer";
 import { requireAuth, loadProfile, requireRole } from "./src/server/auth";
+import { formatCurrency } from "./src/lib/format";
 
 async function startServer() {
   const app = express();
@@ -130,7 +131,7 @@ async function startServer() {
 
               const body = `
                 <h2>Olá ${tenant.displayName},</h2>
-                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>R$ ${Number(payment.amount).toLocaleString('pt-BR')}</b>.</p>
+                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>${formatCurrency(Number(payment.amount))}</b>.</p>
                 <p>Data de vencimento: <b>${dueDate.toLocaleDateString('pt-BR')}</b>.</p>
                 ${isOverdue ? '<p style="color: red; font-weight: bold;">Seu pagamento está ATRASADO. Por favor, regularize o quanto antes.</p>' : ''}
                 <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>

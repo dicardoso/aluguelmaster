@@ -3,8 +3,10 @@ import { useAuth } from '../hooks/useAuth';
 import { storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { apiFetch } from '../lib/api';
+import { formatCurrency } from '../lib/format';
+import { calculateLateFee } from '../lib/lateFee';
 import { Contract, Property, UserProfile, Payment } from '../types';
-import { FileText, Plus, Download, RefreshCw, X, Calendar, User, Building2, Mail, XCircle, Upload, CheckCircle2, History, Clock, CheckCircle, AlertCircle } from 'lucide-react';
+import { FileText, Plus, Download, RefreshCw, X, Calendar, User, Building2, Mail, XCircle, Upload, CheckCircle2, History, Clock, CheckCircle, AlertCircle, Percent, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -25,6 +27,13 @@ export default function Contracts() {
   const [selectedContractForHistory, setSelectedContractForHistory] = useState<Contract | null>(null);
   const [contractPayments, setContractPayments] = useState<Payment[]>([]);
   const [uploadingContractId, setUploadingContractId] = useState<string | null>(null);
+
+  // Filters and Pagination
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
   const [formData, setFormData] = useState<Partial<Contract>>({
     propertyId: '',
     tenantUid: '',
@@ -161,8 +170,7 @@ export default function Contracts() {
 
     // VALOR DO CONTRATO
     addHeader('VALOR DO CONTRATO');
-    const formattedValue = contract.monthlyRent.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    addParagraph(`O valor do aluguel mensal será igual a R$ ${formattedValue}. O aluguel será corrigido anualmente de acordo com o índice de reajuste do Governo. O aluguel vencerá no dia ${contract.dueDay || 10} de cada mês.`);
+    addParagraph(`O valor do aluguel mensal será igual a ${formatCurrency(contract.monthlyRent)}. O aluguel será corrigido anualmente de acordo com o índice de reajuste do Governo. O aluguel vencerá no dia ${contract.dueDay || 10} de cada mês.`);
     addParagraph(`O atraso no pagamento de quaisquer parcelas provocará multa de 2% e juros de mora à razão de 12% ao ano. Os aluguéis serão pagos pelo LOCATÁRIO no endereço do LOCADOR. Além do aluguel mensal, o LOCATÁRIO pagará as despesas de energia e de água.`);
 
     // DANOS
@@ -256,6 +264,24 @@ export default function Contracts() {
     }
   };
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterStatus]);
+
+  const handleToggleLateFee = async (contract: Contract) => {
+    try {
+      await apiFetch(`/api/contracts/${contract.id}/late-fee`, {
+        method: 'PATCH',
+        body: JSON.stringify({ lateFeeEnabled: !contract.lateFeeEnabled }),
+      });
+      toast.success(contract.lateFeeEnabled ? 'Multa/juros automáticos desativados.' : 'Multa/juros automáticos ativados.');
+      await fetchContracts();
+    } catch (error) {
+      console.error('Failed to toggle late fee:', error);
+      toast.error('Erro ao atualizar configuração de multa/juros.');
+    }
+  };
+
   const handleRenew = async () => {
     if (!contractToRenew) return;
     try {
@@ -326,6 +352,22 @@ export default function Contracts() {
     }
   };
 
+  const filteredContracts = contracts.filter((contract) => {
+    const property = properties.find(p => p.id === contract.propertyId);
+    const tenant = users.find(u => u.uid === contract.tenantUid);
+    const matchesStatus = filterStatus === 'all' || contract.status === filterStatus;
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch =
+      !searchLower ||
+      property?.address?.toLowerCase().includes(searchLower) ||
+      tenant?.displayName?.toLowerCase().includes(searchLower) ||
+      contract.id.toLowerCase().includes(searchLower);
+    return matchesStatus && matchesSearch;
+  });
+
+  const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
+  const paginatedContracts = filteredContracts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   if (loading) return <PageLoader />;
 
   return (
@@ -349,6 +391,36 @@ export default function Contracts() {
         )}
       </div>
 
+      {/* Filters and Search */}
+      <div className="flex flex-col sm:flex-row gap-4 bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar por imóvel, inquilino ou ID..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-5 h-5 text-gray-400" />
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+          >
+            <option value="all">Todos os Status</option>
+            <option value="active">Ativo</option>
+            <option value="pending">Pendente</option>
+            <option value="expired">Expirado</option>
+            <option value="renewed">Renovado</option>
+            <option value="cancelled">Cancelado</option>
+            <option value="terminated">Encerrado</option>
+          </select>
+        </div>
+      </div>
+
       <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
@@ -364,7 +436,7 @@ export default function Contracts() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-700">
-              {contracts.map((contract) => {
+              {paginatedContracts.map((contract) => {
                 const property = properties.find(p => p.id === contract.propertyId);
                 const tenant = users.find(u => u.uid === contract.tenantUid);
                 return (
@@ -388,7 +460,7 @@ export default function Contracts() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-sm font-bold text-gray-900 dark:text-white">R$ {contract.monthlyRent.toLocaleString('pt-BR')}</span>
+                      <span className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(contract.monthlyRent)}</span>
                     </td>
                     <td className="px-6 py-4">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -474,6 +546,17 @@ export default function Contracts() {
                               <Mail className="w-4 h-4" />
                             </button>
                             <button
+                              onClick={() => handleToggleLateFee(contract)}
+                              className={`p-2 rounded-lg transition-colors ${
+                                contract.lateFeeEnabled
+                                  ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400'
+                                  : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+                              }`}
+                              title={contract.lateFeeEnabled ? 'Multa/juros automáticos ativados (clique para desativar)' : 'Ativar multa/juros automáticos em atrasos'}
+                            >
+                              <Percent className="w-4 h-4" />
+                            </button>
+                            <button
                               onClick={() => setContractToRenew(contract)}
                               className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
                               title="Renovar Contrato"
@@ -500,7 +583,7 @@ export default function Contracts() {
 
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
-          {contracts.map((contract) => {
+          {paginatedContracts.map((contract) => {
             const property = properties.find(p => p.id === contract.propertyId);
             const tenant = users.find(u => u.uid === contract.tenantUid);
             return (
@@ -535,7 +618,7 @@ export default function Contracts() {
                   </div>
                   <div>
                     <p className="text-[10px] uppercase font-bold text-gray-400 mb-1">Valor Mensal</p>
-                    <p className="text-sm font-bold text-gray-900 dark:text-white">R$ {contract.monthlyRent.toLocaleString('pt-BR')}</p>
+                    <p className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(contract.monthlyRent)}</p>
                   </div>
                 </div>
 
@@ -588,6 +671,17 @@ export default function Contracts() {
                         </div>
                       )}
                       <button
+                        onClick={() => handleToggleLateFee(contract)}
+                        className={`p-2 rounded-lg transition-colors ${
+                          contract.lateFeeEnabled
+                            ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400'
+                            : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30'
+                        }`}
+                        title={contract.lateFeeEnabled ? 'Multa/juros automáticos ativados' : 'Ativar multa/juros automáticos'}
+                      >
+                        <Percent className="w-5 h-5" />
+                      </button>
+                      <button
                         onClick={() => setContractToRenew(contract)}
                         className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
                       >
@@ -606,7 +700,42 @@ export default function Contracts() {
             );
           })}
         </div>
+
+        {filteredContracts.length === 0 && (
+          <div className="p-12 text-center">
+            <FileText className="w-12 h-12 text-gray-200 dark:text-gray-700 mx-auto mb-4" />
+            <p className="text-gray-400 dark:text-gray-500">Nenhum contrato encontrado.</p>
+          </div>
+        )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Mostrando <span className="font-bold text-gray-900 dark:text-white">{(currentPage - 1) * itemsPerPage + 1}</span> a <span className="font-bold text-gray-900 dark:text-white">{Math.min(currentPage * itemsPerPage, filteredContracts.length)}</span> de <span className="font-bold text-gray-900 dark:text-white">{filteredContracts.length}</span> contratos
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-90"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <span className="text-xs font-bold text-gray-700 dark:text-gray-300 px-3 py-1 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-100 dark:border-gray-700">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-90"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal */}
       {isModalOpen && (
@@ -710,6 +839,18 @@ export default function Contracts() {
                   />
                 </div>
               </div>
+              <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!formData.lateFeeEnabled}
+                  onChange={(e) => setFormData({ ...formData, lateFeeEnabled: e.target.checked })}
+                  className="mt-0.5 w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                />
+                <span className="text-sm text-gray-600 dark:text-gray-300">
+                  Aplicar multa e juros automaticamente em pagamentos atrasados
+                  <span className="block text-xs text-gray-400 dark:text-gray-500">2% de multa + 1% ao mês de juros, proporcional aos dias de atraso (apenas exibido — não altera o valor da parcela).</span>
+                </span>
+              </label>
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
@@ -777,8 +918,16 @@ export default function Contracts() {
                            payment.status === 'overdue' ? <AlertCircle className="w-5 h-5" /> : <Clock className="w-5 h-5" />}
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-gray-900 dark:text-white">R$ {payment.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                          <p className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(payment.amount)}</p>
                           <p className="text-xs text-gray-500 dark:text-gray-400">Vencimento: {format(parseISO(payment.dueDate), 'dd/MM/yyyy')}</p>
+                          {selectedContractForHistory.lateFeeEnabled && payment.status === 'pending' && (() => {
+                            const fee = calculateLateFee(payment.amount, payment.dueDate);
+                            return fee.daysLate > 0 ? (
+                              <p className="text-[10px] text-amber-600 dark:text-amber-400 font-medium mt-0.5">
+                                + multa/juros: {formatCurrency(fee.fine + fee.interest)} (total {formatCurrency(fee.total)})
+                              </p>
+                            ) : null;
+                          })()}
                         </div>
                       </div>
                       <div className="text-right">

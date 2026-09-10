@@ -98,6 +98,10 @@ model Contract {
   signedAt          DateTime?
   signedContractUrl String?
   reminderSentAt    DateTime?
+  // Per-contract opt-in for automatic late fee (multa 2% + juros de mora 1%/mês pro-rata)
+  // on overdue payments — computed client-side for display only, never persisted onto
+  // Payment.amount, so historical charges never get silently rewritten.
+  lateFeeEnabled    Boolean        @default(false)
   createdAt         DateTime       @default(now())
 
   payments Payment[]

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch, ApiError } from '../lib/api';
 import { UserProfile, UserRole } from '../types';
-import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../components/ConfirmModal';
 import PageLoader from '../components/PageLoader';
@@ -24,6 +24,12 @@ export default function Users() {
 
   const [confirmSave, setConfirmSave] = useState(false);
 
+  // Filters and Pagination
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterRole, setFilterRole] = useState('all');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 8;
+
   const fetchUsers = useCallback(async () => {
     try {
       const data = await apiFetch<any[]>('/api/users');
@@ -38,6 +44,10 @@ export default function Users() {
     if (!profile || !isAdmin) return;
     fetchUsers().finally(() => setLoading(false));
   }, [profile, isAdmin, fetchUsers]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, filterRole]);
 
   const handleSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -84,6 +94,20 @@ export default function Users() {
     );
   }
 
+  const filteredUsers = users.filter((user) => {
+    const matchesRole = filterRole === 'all' || user.role === filterRole;
+    const searchLower = searchQuery.toLowerCase();
+    const matchesSearch =
+      !searchLower ||
+      user.displayName?.toLowerCase().includes(searchLower) ||
+      user.email?.toLowerCase().includes(searchLower) ||
+      user.cpf?.toLowerCase().includes(searchLower);
+    return matchesRole && matchesSearch;
+  });
+
+  const totalPages = Math.ceil(filteredUsers.length / itemsPerPage);
+  const paginatedUsers = filteredUsers.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   if (loading) return <PageLoader />;
 
   return (
@@ -102,6 +126,33 @@ export default function Users() {
         </button>
       </div>
 
+      {/* Filters and Search */}
+      <div className="flex flex-col sm:flex-row gap-4 bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm">
+        <div className="flex-1 relative">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+          <input
+            type="text"
+            placeholder="Buscar por nome, e-mail ou CPF..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-10 pr-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Filter className="w-5 h-5 text-gray-400" />
+          <select
+            value={filterRole}
+            onChange={(e) => setFilterRole(e.target.value)}
+            className="px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 focus:ring-2 focus:ring-blue-500 outline-none bg-white dark:bg-gray-900 text-gray-900 dark:text-white"
+          >
+            <option value="all">Todas as Funções</option>
+            <option value="admin">Administrador</option>
+            <option value="landlord">Proprietário</option>
+            <option value="tenant">Inquilino</option>
+          </select>
+        </div>
+      </div>
+
       <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
         {/* Desktop Table View */}
         <div className="hidden md:block overflow-x-auto">
@@ -116,7 +167,7 @@ export default function Users() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50 dark:divide-gray-700/50">
-              {users.map((user) => (
+              {paginatedUsers.map((user) => (
                 <tr key={user.uid} className="hover:bg-gray-50/80 dark:hover:bg-gray-700/30 transition-colors group">
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
@@ -163,7 +214,7 @@ export default function Users() {
 
         {/* Mobile Card View */}
         <div className="md:hidden divide-y divide-gray-100 dark:divide-gray-700">
-          {users.map((user) => (
+          {paginatedUsers.map((user) => (
             <div key={user.uid} className="p-4 space-y-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -206,7 +257,42 @@ export default function Users() {
             </div>
           ))}
         </div>
+
+        {filteredUsers.length === 0 && (
+          <div className="p-12 text-center">
+            <UsersIcon className="w-12 h-12 text-gray-200 dark:text-gray-700 mx-auto mb-4" />
+            <p className="text-gray-400 dark:text-gray-500">Nenhum usuário encontrado.</p>
+          </div>
+        )}
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between bg-white dark:bg-gray-800 p-4 rounded-lg border border-gray-100 dark:border-gray-700 shadow-sm">
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            Mostrando <span className="font-bold text-gray-900 dark:text-white">{(currentPage - 1) * itemsPerPage + 1}</span> a <span className="font-bold text-gray-900 dark:text-white">{Math.min(currentPage * itemsPerPage, filteredUsers.length)}</span> de <span className="font-bold text-gray-900 dark:text-white">{filteredUsers.length}</span> usuários
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-90"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
+            <span className="text-xs font-bold text-gray-700 dark:text-gray-300 px-3 py-1 bg-gray-50 dark:bg-gray-900 rounded-md border border-gray-100 dark:border-gray-700">
+              {currentPage} / {totalPages}
+            </span>
+            <button
+              onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="p-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-30 disabled:cursor-not-allowed transition-all active:scale-90"
+            >
+              <ChevronRight className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Modal */}
       {isModalOpen && (

@@ -31,10 +31,11 @@ export interface Contract {
   endDate: string;
   dueDay: number;
   monthlyRent: number;
-  status: 'active' | 'expired' | 'terminated' | 'pending';
+  status: 'active' | 'expired' | 'terminated' | 'pending' | 'renewed' | 'cancelled';
   pdfUrl?: string;
   signedAt?: string;
   signedContractUrl?: string;
+  lateFeeEnabled?: boolean;
 }
 
 export interface Payment {
