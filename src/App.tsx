@@ -10,6 +10,7 @@ import Payments from './pages/Payments';
 import Users from './pages/Users';
 import Login from './pages/Login';
 import Settings from './pages/Settings';
+import Profile from './pages/Profile';
 import { useEffect } from 'react';
 import { apiFetch } from './lib/api';
 
@@ -63,6 +64,7 @@ export default function App() {
                     <Route path="/contracts" element={<Contracts />} />
                     <Route path="/payments" element={<Payments />} />
                     <Route path="/settings" element={<Settings />} />
+                    <Route path="/profile" element={<Profile />} />
                   </Routes>
                 </Layout>
               </ProtectedRoute>

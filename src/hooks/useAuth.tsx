@@ -12,6 +12,7 @@ interface AuthContextType {
   isLandlord: boolean;
   isTenant: boolean;
   updateTheme: (theme: 'light' | 'dark' | 'system') => Promise<void>;
+  refreshProfile: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -22,6 +23,7 @@ const AuthContext = createContext<AuthContextType>({
   isLandlord: false,
   isTenant: false,
   updateTheme: async () => {},
+  refreshProfile: async () => {},
 });
 
 // The API returns the Postgres row shape (`id`), while the rest of the app still
@@ -98,6 +100,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     }
   };
 
+  const refreshProfile = async () => {
+    if (!user) return;
+    try {
+      const data = await apiFetch<any>('/api/me');
+      setProfile(toUserProfile(data));
+    } catch (error) {
+      console.error('Failed to refresh profile:', error);
+    }
+  };
+
   const value = {
     user,
     profile,
@@ -106,6 +118,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     isLandlord: profile?.role === 'landlord',
     isTenant: profile?.role === 'tenant',
     updateTheme,
+    refreshProfile,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

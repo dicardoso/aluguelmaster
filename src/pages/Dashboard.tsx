@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../lib/api';
 import { Property, Contract, Payment } from '../types';
@@ -46,19 +47,20 @@ export default function Dashboard() {
 
   const COLORS = ['#10B981', '#F59E0B', '#EF4444'];
 
-  const [notifications, setNotifications] = useState<{ id: string; title: string; type: 'warning' | 'error' }[]>([]);
+  const [notifications, setNotifications] = useState<{ id: string; title: string; type: 'warning' | 'error'; path: string }[]>([]);
 
   useEffect(() => {
-    const newNotifications: { id: string; title: string; type: 'warning' | 'error' }[] = [];
-    
+    const newNotifications: { id: string; title: string; type: 'warning' | 'error'; path: string }[] = [];
+
     // Check expiring contracts
     contracts.forEach(c => {
       const expiry = new Date(c.endDate);
       if (isAfter(expiry, new Date()) && isBefore(expiry, addDays(new Date(), 30))) {
-        newNotifications.push({ 
-          id: `contract-${c.id}`, 
-          title: `Contrato #${c.id.slice(0, 6)} vence em ${format(expiry, 'dd/MM/yyyy')}`, 
-          type: 'warning' 
+        newNotifications.push({
+          id: `contract-${c.id}`,
+          title: `Contrato #${c.id.slice(0, 6)} vence em ${format(expiry, 'dd/MM/yyyy')}`,
+          type: 'warning',
+          path: '/contracts',
         });
       }
     });
@@ -66,10 +68,11 @@ export default function Dashboard() {
     // Check overdue payments
     payments.forEach(p => {
       if (p.status === 'pending' && isBefore(new Date(p.dueDate), new Date())) {
-        newNotifications.push({ 
-          id: `payment-${p.id}`, 
-          title: `Pagamento de R$ ${p.amount} está atrasado (Vencimento: ${format(new Date(p.dueDate), 'dd/MM/yyyy')})`, 
-          type: 'error' 
+        newNotifications.push({
+          id: `payment-${p.id}`,
+          title: `Pagamento de R$ ${p.amount} está atrasado (Vencimento: ${format(new Date(p.dueDate), 'dd/MM/yyyy')})`,
+          type: 'error',
+          path: '/payments',
         });
       }
     });
@@ -92,12 +95,16 @@ export default function Dashboard() {
       {notifications.length > 0 && (
         <div className="space-y-3">
           {notifications.map(notif => (
-            <div key={notif.id} className={`p-4 rounded-xl border flex items-center gap-3 ${
-              notif.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30 text-red-700 dark:text-red-400' : 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30 text-orange-700 dark:text-orange-400'
-            }`}>
+            <Link
+              key={notif.id}
+              to={notif.path}
+              className={`p-4 rounded-xl border flex items-center gap-3 transition-colors hover:brightness-95 dark:hover:brightness-110 ${
+                notif.type === 'error' ? 'bg-red-50 dark:bg-red-900/20 border-red-100 dark:border-red-900/30 text-red-700 dark:text-red-400' : 'bg-orange-50 dark:bg-orange-900/20 border-orange-100 dark:border-orange-900/30 text-orange-700 dark:text-orange-400'
+              }`}
+            >
               <AlertCircle className="w-5 h-5" />
               <p className="text-sm font-medium">{notif.title}</p>
-            </div>
+            </Link>
           ))}
         </div>
       )}
