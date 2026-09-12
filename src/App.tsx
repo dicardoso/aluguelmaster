@@ -27,7 +27,6 @@ const ReminderTrigger = () => {
         apiFetch<{ success: boolean; results: unknown }>('/api/reminders/process', { method: 'POST' })
           .then(data => {
             if (data.success) {
-              console.log('Reminders processed:', data.results);
               localStorage.setItem('last_reminder_check', today);
             }
           })

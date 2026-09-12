@@ -1,8 +1,9 @@
 import React, { useState, useEffect, createContext, useContext } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth } from '../firebase';
+import { auth, logout } from '../firebase';
 import { UserProfile } from '../types';
-import { apiFetch } from '../lib/api';
+import { apiFetch, ApiError } from '../lib/api';
+import { toast } from 'sonner';
 
 interface AuthContextType {
   user: User | null;
@@ -62,6 +63,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           applyTheme(loadedProfile.themePreference);
         } catch (error) {
           console.error('Failed to load profile:', error);
+          if (error instanceof ApiError && error.status === 403) {
+            toast.error(error.message);
+            await logout();
+          }
         }
       } else {
         setProfile(null);
