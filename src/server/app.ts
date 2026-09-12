@@ -9,7 +9,7 @@ import paymentsRouter from "./routes/payments.js";
 import usersRouter from "./routes/users.js";
 import settingsRouter from "./routes/settings.js";
 import { prisma } from "./prisma.js";
-import { sendMail } from "./mailer.js";
+import { sendMail, emailLayout, emailDetailsTable, emailBadge } from "./mailer.js";
 import { requireAuth, loadProfile, requireRole } from "./auth.js";
 import { formatCurrency } from "../lib/format.js";
 
@@ -49,23 +49,13 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
-  app.post("/api/email/contract-notification", requireAuth, loadProfile, async (req, res) => {
-    const { to, subject, body } = req.body;
-    try {
-      await sendMail({ to, subject, html: body });
-      res.json({ success: true, message: "Email sent successfully" });
-    } catch (error) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ success: false, error: "Failed to send email" });
-    }
-  });
-
   app.post("/api/reminders/process", requireAuth, loadProfile, requireRole('admin'), async (req, res) => {
     try {
       const now = new Date();
 
       const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
-      const appName = settings?.appName || 'Equipe AluguelMaster';
+      const appName = settings?.appName || 'AluguelMaster';
+      const appUrl = process.env.APP_URL || '';
       const contractExpiryReminderDays = settings?.contractExpiryReminderDays ?? 30;
       const paymentDueReminderDays = settings?.paymentDueReminderDays ?? 3;
       // Once a reminder fires, don't resend for most of the window — otherwise a tenant
@@ -100,13 +90,16 @@ export function createApp() {
 
             if (tenant?.email) {
               const subject = `Lembrete: Seu contrato está próximo do vencimento`;
-              const body = `
-                <h2>Olá ${tenant.displayName},</h2>
-                <p>Seu contrato de aluguel está previsto para encerrar em <b>${endDate.toLocaleDateString('pt-BR')}</b>.</p>
-                <p>Por favor, entre em contato com o proprietário para discutir a renovação ou os próximos passos.</p>
-                <br/>
-                <p>Atenciosamente,<br/>${appName}</p>
-              `;
+              const body = emailLayout({
+                appName,
+                heading: 'Seu contrato está vencendo em breve ⏳',
+                bodyHtml: `
+                  <p>Seu contrato de aluguel está previsto para encerrar em <strong>${endDate.toLocaleDateString('pt-BR')}</strong>.</p>
+                  <p>Por favor, entre em contato com o proprietário para discutir a renovação ou os próximos passos.</p>
+                `,
+                ctaLabel: 'Acessar Plataforma',
+                ctaUrl: appUrl || undefined,
+              });
 
               try {
                 await sendMail({ to: tenant.email, subject, html: body });
@@ -140,15 +133,21 @@ export function createApp() {
                 ? `ALERTA: Pagamento de aluguel ATRASADO`
                 : `Lembrete: Vencimento de aluguel em breve`;
 
-              const body = `
-                <h2>Olá ${tenant.displayName},</h2>
-                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>${formatCurrency(Number(payment.amount))}</b>.</p>
-                <p>Data de vencimento: <b>${dueDate.toLocaleDateString('pt-BR')}</b>.</p>
-                ${isOverdue ? '<p style="color: red; font-weight: bold;">Seu pagamento está ATRASADO. Por favor, regularize o quanto antes.</p>' : ''}
-                <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
-                <br/>
-                <p>Atenciosamente,<br/>${appName}</p>
-              `;
+              const body = emailLayout({
+                appName,
+                heading: isOverdue ? 'Pagamento em atraso ⚠️' : 'Seu aluguel vence em breve 🗓️',
+                bodyHtml: `
+                  <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <strong>${formatCurrency(Number(payment.amount))}</strong>.</p>
+                  ${emailDetailsTable([
+                    ['Vencimento', dueDate.toLocaleDateString('pt-BR')],
+                    ['Status', isOverdue ? emailBadge('Atrasado', 'red') : emailBadge('Pendente', 'amber')],
+                  ])}
+                  ${isOverdue ? '<p style="color:#dc2626;font-weight:600;">Seu pagamento está atrasado. Por favor, regularize o quanto antes.</p>' : ''}
+                  <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
+                `,
+                ctaLabel: 'Acessar Plataforma',
+                ctaUrl: appUrl || undefined,
+              });
 
               try {
                 await sendMail({ to: tenant.email, subject, html: body });

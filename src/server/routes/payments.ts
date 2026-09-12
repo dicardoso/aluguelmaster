@@ -2,8 +2,47 @@ import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js';
 import { serializePayment } from '../serialize.js';
+import { sendMail, emailLayout, emailDetailsTable, emailBadge } from '../mailer.js';
+import { formatCurrency } from '../../lib/format.js';
 
 const router = Router();
+
+async function sendPaymentReceiptEmail(payment: { tenantUid: string; amount: any; dueDate: Date; paidAt: Date | null }, propertyId: string) {
+  const [tenant, property, settings] = await Promise.all([
+    prisma.user.findUnique({ where: { id: payment.tenantUid } }),
+    prisma.property.findUnique({ where: { id: propertyId } }),
+    prisma.settings.findUnique({ where: { id: 'global' } }),
+  ]);
+  if (!tenant?.email) return;
+
+  const appName = settings?.appName || 'AluguelMaster';
+  const appUrl = process.env.APP_URL || '';
+  const paidAtStr = (payment.paidAt ?? new Date()).toISOString().slice(0, 10).split('-').reverse().join('/');
+  const dueDateStr = payment.dueDate.toISOString().slice(0, 10).split('-').reverse().join('/');
+
+  const html = emailLayout({
+    appName,
+    heading: 'Pagamento confirmado ✅',
+    bodyHtml: `
+      <p>Confirmamos o recebimento do pagamento do aluguel referente ao imóvel em <strong>${property?.address}</strong>.</p>
+      ${emailBadge('Pago', 'green')}
+      ${emailDetailsTable([
+        ['Valor', formatCurrency(Number(payment.amount))],
+        ['Vencimento', dueDateStr],
+        ['Pago em', paidAtStr],
+      ])}
+      <p>Você pode acessar a plataforma para baixar o recibo completo.</p>
+    `,
+    ctaLabel: 'Ver Recibo',
+    ctaUrl: appUrl || undefined,
+  });
+
+  try {
+    await sendMail({ to: tenant.email, subject: `Recibo de Pagamento - ${property?.address}`, html });
+  } catch (error) {
+    console.error('Payment receipt email error:', error);
+  }
+}
 
 router.use(requireAuth, loadProfile);
 
@@ -64,6 +103,11 @@ router.patch('/:id/mark-paid', requireRole('admin', 'landlord'), async (req: Aut
     where: { id: existing.id },
     data: { status: 'paid', paidAt: paidAt ? new Date(paidAt) : new Date() },
   });
+
+  sendPaymentReceiptEmail(updated, existing.contract.propertyId).catch((error) => {
+    console.error('Failed to send payment receipt email:', error);
+  });
+
   res.json(serializePayment(updated));
 });
 
