@@ -15,20 +15,16 @@ import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
 import ContractsTableSkeleton from '../components/ContractsTableSkeleton';
 
-// Mirrors RENEWAL_WINDOW_DAYS in src/server/routes/contracts.ts — kept in sync manually
-// since the client needs it to gate the button before the server ever sees the request.
-const RENEWAL_WINDOW_DAYS = 60;
-
 function daysUntil(dateStr: string) {
   return (new Date(dateStr).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
 }
 
-function isRenewable(contract: Contract) {
-  return contract.status === 'active' && daysUntil(contract.endDate) <= RENEWAL_WINDOW_DAYS;
-}
-
 export default function Contracts() {
   const { profile, isAdmin, isLandlord } = useAuth();
+  // Server-configured (Settings page); 60 is just the fallback while it loads.
+  const [renewalWindowDays, setRenewalWindowDays] = useState(60);
+  const isRenewable = (contract: Contract) =>
+    contract.status === 'active' && daysUntil(contract.endDate) <= renewalWindowDays;
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -75,6 +71,9 @@ export default function Contracts() {
       apiFetch<Property[]>('/api/properties').then(setProperties),
       apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
         setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+      }),
+      apiFetch<{ renewalWindowDays: number }>('/api/settings/thresholds').then((data) => {
+        setRenewalWindowDays(data.renewalWindowDays);
       }),
     ]).then((results) => {
       results.forEach((r) => r.status === 'rejected' && console.error('Failed to load contracts page data:', r.reason));
@@ -586,7 +585,7 @@ export default function Contracts() {
                               onClick={() => isRenewable(contract) && openRenewModal(contract)}
                               disabled={!isRenewable(contract)}
                               className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
-                              title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${RENEWAL_WINDOW_DAYS} dias antes do vencimento`}
+                              title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
                             >
                               <RefreshCw className="w-4 h-4" />
                             </button>
@@ -711,7 +710,7 @@ export default function Contracts() {
                       <button
                         onClick={() => isRenewable(contract) && openRenewModal(contract)}
                         disabled={!isRenewable(contract)}
-                        title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${RENEWAL_WINDOW_DAYS} dias antes do vencimento`}
+                        title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
                         className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
                       >
                         <RefreshCw className="w-5 h-5" />

@@ -142,10 +142,6 @@ async function loadAccessibleContract(req: AuthedRequest, res: any) {
   return contract;
 }
 
-// A contract can only be renewed once it's close to expiring — renewing a contract
-// that just started made no sense and let stale double-renewals slip through.
-const RENEWAL_WINDOW_DAYS = 60;
-
 router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
   const existing = await loadAccessibleContract(req, res);
   if (!existing) return;
@@ -155,10 +151,15 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
     return;
   }
 
+  // A contract can only be renewed once it's close to expiring — renewing a contract
+  // that just started made no sense and let stale double-renewals slip through.
+  const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
+  const renewalWindowDays = settings?.renewalWindowDays ?? 60;
+
   const daysUntilEnd = (existing.endDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
-  if (daysUntilEnd > RENEWAL_WINDOW_DAYS) {
+  if (daysUntilEnd > renewalWindowDays) {
     res.status(400).json({
-      error: `Este contrato só pode ser renovado a partir de ${RENEWAL_WINDOW_DAYS} dias antes do vencimento (faltam ${Math.ceil(daysUntilEnd)} dias).`,
+      error: `Este contrato só pode ser renovado a partir de ${renewalWindowDays} dias antes do vencimento (faltam ${Math.ceil(daysUntilEnd)} dias).`,
     });
     return;
   }

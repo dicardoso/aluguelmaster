@@ -5,16 +5,41 @@ import { requireAuth, loadProfile, requireRole } from '../auth.js';
 
 const router = Router();
 
-router.use(requireAuth, loadProfile, requireRole('admin'));
+router.use(requireAuth, loadProfile);
 
-router.get('/', async (_req, res) => {
+// Alert/renewal day-thresholds only — no SMTP/company info — so any authenticated role
+// can read them (the contract-renewal button needs this for landlords, not just admins).
+router.get('/thresholds', async (_req, res) => {
+  const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
+  res.json({
+    contractExpiryReminderDays: settings?.contractExpiryReminderDays ?? 30,
+    paymentDueReminderDays: settings?.paymentDueReminderDays ?? 3,
+    renewalWindowDays: settings?.renewalWindowDays ?? 60,
+  });
+});
+
+router.get('/', requireRole('admin'), async (_req, res) => {
   const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
   const { smtpPasswordEncrypted, ...rest } = settings ?? { id: 'global' };
   res.json({ ...rest, smtpPasswordConfigured: !!smtpPasswordEncrypted });
 });
 
-router.put('/', async (req, res) => {
-  const { appName, companyName, supportEmail, smtpHost, smtpPort, smtpUser, smtpPassword, emailFrom } = req.body ?? {};
+router.put('/', requireRole('admin'), async (req, res) => {
+  const {
+    appName, companyName, supportEmail, smtpHost, smtpPort, smtpUser, smtpPassword, emailFrom,
+    contractExpiryReminderDays, paymentDueReminderDays, renewalWindowDays,
+  } = req.body ?? {};
+
+  for (const [label, value] of [
+    ['contractExpiryReminderDays', contractExpiryReminderDays],
+    ['paymentDueReminderDays', paymentDueReminderDays],
+    ['renewalWindowDays', renewalWindowDays],
+  ] as const) {
+    if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+      res.status(400).json({ error: `${label} deve ser um número inteiro positivo.` });
+      return;
+    }
+  }
 
   const ENCRYPTION_KEY = process.env.SETTINGS_ENCRYPTION_KEY || 'default-secret-key-12345';
   const smtpPasswordEncrypted = smtpPassword
@@ -33,6 +58,9 @@ router.put('/', async (req, res) => {
       smtpUser,
       smtpPasswordEncrypted,
       emailFrom,
+      ...(contractExpiryReminderDays !== undefined && { contractExpiryReminderDays }),
+      ...(paymentDueReminderDays !== undefined && { paymentDueReminderDays }),
+      ...(renewalWindowDays !== undefined && { renewalWindowDays }),
     },
     update: {
       ...(appName !== undefined && { appName }),
@@ -43,6 +71,9 @@ router.put('/', async (req, res) => {
       ...(smtpUser !== undefined && { smtpUser }),
       ...(smtpPasswordEncrypted !== undefined && { smtpPasswordEncrypted }),
       ...(emailFrom !== undefined && { emailFrom }),
+      ...(contractExpiryReminderDays !== undefined && { contractExpiryReminderDays }),
+      ...(paymentDueReminderDays !== undefined && { paymentDueReminderDays }),
+      ...(renewalWindowDays !== undefined && { renewalWindowDays }),
     },
   });
 

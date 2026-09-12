@@ -66,11 +66,19 @@ export function createApp() {
 
       const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
       const appName = settings?.appName || 'Equipe AluguelMaster';
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(now.getDate() + 30);
+      const contractExpiryReminderDays = settings?.contractExpiryReminderDays ?? 30;
+      const paymentDueReminderDays = settings?.paymentDueReminderDays ?? 3;
+      // Once a reminder fires, don't resend for most of the window — otherwise a tenant
+      // would get emailed daily for the entire lead time. Kept proportional to the
+      // configured window instead of a fixed 25 days so it still makes sense if an admin
+      // shortens/lengthens it.
+      const contractReminderDedupeDays = Math.max(1, contractExpiryReminderDays - 5);
 
-      const threeDaysFromNow = new Date();
-      threeDaysFromNow.setDate(now.getDate() + 3);
+      const contractExpiryThreshold = new Date();
+      contractExpiryThreshold.setDate(now.getDate() + contractExpiryReminderDays);
+
+      const paymentDueThreshold = new Date();
+      paymentDueThreshold.setDate(now.getDate() + paymentDueReminderDays);
 
       const results = {
         contracts: 0,
@@ -78,16 +86,16 @@ export function createApp() {
         errors: [] as string[]
       };
 
-      // 1. Process Contracts (Expiring in 30 days)
+      // 1. Process Contracts (Expiring within the configured window)
       const activeContracts = await prisma.contract.findMany({ where: { status: 'active' } });
 
       for (const contract of activeContracts) {
         const endDate = contract.endDate;
 
-        // If expiring in less than 30 days and no reminder sent in last 30 days
-        if (endDate <= thirtyDaysFromNow && endDate > now) {
+        // If expiring within the window and no reminder sent recently
+        if (endDate <= contractExpiryThreshold && endDate > now) {
           const lastReminder = contract.reminderSentAt;
-          if (!lastReminder || (now.getTime() - lastReminder.getTime() > 25 * 24 * 60 * 60 * 1000)) {
+          if (!lastReminder || (now.getTime() - lastReminder.getTime() > contractReminderDedupeDays * 24 * 60 * 60 * 1000)) {
             const tenant = await prisma.user.findUnique({ where: { id: contract.tenantUid } });
 
             if (tenant?.email) {
@@ -113,14 +121,14 @@ export function createApp() {
         }
       }
 
-      // 2. Process Payments (Due in 3 days or Overdue)
+      // 2. Process Payments (Due within the configured window, or overdue)
       const duePayments = await prisma.payment.findMany({ where: { status: { in: ['pending', 'overdue'] } } });
 
       for (const payment of duePayments) {
         const dueDate = payment.dueDate;
 
-        // If due in less than 3 days or already overdue
-        if (dueDate <= threeDaysFromNow) {
+        // If due within the window or already overdue
+        if (dueDate <= paymentDueThreshold) {
           const lastReminder = payment.reminderSentAt;
           // Send reminder if none sent today
           if (!lastReminder || (now.toDateString() !== lastReminder.toDateString())) {

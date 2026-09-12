@@ -60,5 +60,8 @@ export interface AppSettings {
   smtpPassword?: string;
   smtpPasswordConfigured?: boolean;
   emailFrom: string;
+  contractExpiryReminderDays: number;
+  paymentDueReminderDays: number;
+  renewalWindowDays: number;
   updatedAt?: string;
 }

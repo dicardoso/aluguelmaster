@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch } from '../lib/api';
 import { AppSettings } from '../types';
-import { Settings as SettingsIcon, Save, Mail, Building, Server } from 'lucide-react';
+import { Settings as SettingsIcon, Save, Mail, Building, Server, BellRing } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Settings() {
@@ -18,6 +18,9 @@ export default function Settings() {
     smtpUser: '',
     smtpPassword: '',
     emailFrom: '',
+    contractExpiryReminderDays: 30,
+    paymentDueReminderDays: 3,
+    renewalWindowDays: 60,
   });
 
   useEffect(() => {
@@ -197,6 +200,63 @@ export default function Settings() {
                 placeholder={formData.smtpPasswordConfigured ? 'Já configurada — preencha para trocar' : '••••••••••••••••'}
               />
               {/* The server never sends the real password back — it stays server-only. Leave blank to keep it unchanged. */}
+            </div>
+          </div>
+        </div>
+
+        {/* Alert & Renewal Thresholds */}
+        <div className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-100 dark:border-gray-700 shadow-sm overflow-hidden">
+          <div className="p-6 border-b border-gray-100 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-900/50">
+            <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+              <BellRing className="w-5 h-5 text-gray-400 dark:text-gray-500" />
+              Alertas e Renovação
+            </h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+              Prazos, em dias, usados nos lembretes automáticos por e-mail e na liberação da renovação de contratos.
+            </p>
+          </div>
+          <div className="p-6 grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Lembrete de vencimento de contrato
+              </label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={formData.contractExpiryReminderDays}
+                onChange={(e) => setFormData({ ...formData, contractExpiryReminderDays: Number(e.target.value) })}
+                className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              />
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Dias antes do fim do contrato para avisar o inquilino.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Lembrete de pagamento
+              </label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={formData.paymentDueReminderDays}
+                onChange={(e) => setFormData({ ...formData, paymentDueReminderDays: Number(e.target.value) })}
+                className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              />
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Dias antes do vencimento da parcela para avisar o inquilino.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                Janela de renovação
+              </label>
+              <input
+                type="number"
+                min="1"
+                required
+                value={formData.renewalWindowDays}
+                onChange={(e) => setFormData({ ...formData, renewalWindowDays: Number(e.target.value) })}
+                className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
+              />
+              <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Dias antes do vencimento a partir dos quais o contrato pode ser renovado.</p>
             </div>
           </div>
         </div>
