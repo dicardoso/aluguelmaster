@@ -142,9 +142,37 @@ async function loadAccessibleContract(req: AuthedRequest, res: any) {
   return contract;
 }
 
+// A contract can only be renewed once it's close to expiring — renewing a contract
+// that just started made no sense and let stale double-renewals slip through.
+const RENEWAL_WINDOW_DAYS = 60;
+
 router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
   const existing = await loadAccessibleContract(req, res);
   if (!existing) return;
+
+  if (existing.status !== 'active') {
+    res.status(400).json({ error: 'Apenas contratos ativos podem ser renovados.' });
+    return;
+  }
+
+  const daysUntilEnd = (existing.endDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+  if (daysUntilEnd > RENEWAL_WINDOW_DAYS) {
+    res.status(400).json({
+      error: `Este contrato só pode ser renovado a partir de ${RENEWAL_WINDOW_DAYS} dias antes do vencimento (faltam ${Math.ceil(daysUntilEnd)} dias).`,
+    });
+    return;
+  }
+
+  const { monthlyRent } = req.body ?? {};
+  let newMonthlyRent = existing.monthlyRent;
+  if (monthlyRent !== undefined) {
+    const parsed = Number(monthlyRent);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      res.status(400).json({ error: 'Valor de aluguel inválido.' });
+      return;
+    }
+    newMonthlyRent = parsed as any;
+  }
 
   const newStartDate = existing.endDate;
   const newEndDate = new Date(Date.UTC(
@@ -160,7 +188,7 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
         startDate: newStartDate,
         endDate: newEndDate,
         dueDay: existing.dueDay,
-        monthlyRent: existing.monthlyRent,
+        monthlyRent: newMonthlyRent,
         status: 'active',
         lateFeeEnabled: existing.lateFeeEnabled,
         // Deliberately not copied: pdfUrl / signedAt / signedContractUrl — a renewed
