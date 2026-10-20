@@ -44,7 +44,7 @@ Stack: React + Vite + Tailwind no front-end, Express + Prisma (Postgres/Neon) no
 
 `GEMINI_API_KEY` no `.env.example` é resíduo do template original (AI Studio) e não é usado pelo código atual — pode ser ignorado.
 
-O login (Google) e o upload de arquivos assinados de contrato usam Firebase. Em produção, se as `VITE_FIREBASE_*` não estiverem definidas, vale o `firebase-applet-config.json` (config pública do client, não é segredo). Em `develop` e `local` as variáveis são obrigatórias — o app não sobe sem elas.
+O login (Google) e o upload de arquivos assinados de contrato usam Firebase. Em produção, se as `VITE_FIREBASE_*` não estiverem definidas, vale o `firebase-applet-config.json` (config pública do client, não é segredo). Em `develop` e `local` as variáveis são obrigatórias — o app não sobe sem elas. A exceção é `VITE_FIREBASE_STORAGE_BUCKET`: se ficar vazia (projeto Firebase gratuito, sem Storage), o upload de contrato assinado fica oculto nesse ambiente.
 
 ## Ambientes
 
