@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { storage } from '../firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -6,7 +6,7 @@ import { apiFetch } from '../lib/api';
 import { formatCurrency } from '../lib/format';
 import { calculateLateFee } from '../lib/lateFee';
 import { Contract, Property, UserProfile, Payment } from '../types';
-import { FileText, Plus, Download, RefreshCw, X, Calendar, User, Building2, Mail, XCircle, Upload, CheckCircle2, History, Clock, CheckCircle, AlertCircle, Percent, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { FileText, Plus, Download, RefreshCw, X, Calendar, User, Building2, Mail, XCircle, Upload, CheckCircle2, History, Clock, CheckCircle, AlertCircle, Percent, Search, Filter, ChevronLeft, ChevronRight, Pencil, MoreVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import { format, addMonths, parseISO } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -17,6 +17,101 @@ import ContractsTableSkeleton from '../components/ContractsTableSkeleton';
 
 function daysUntil(dateStr: string) {
   return (new Date(dateStr).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+}
+
+interface ActionsMenuItem {
+  label: string;
+  icon: React.ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  // Shown under the label — used to explain why an item is disabled.
+  hint?: string;
+  danger?: boolean;
+  separatorBefore?: boolean;
+}
+
+// The dropdown is `fixed`-positioned from the button's rect rather than absolutely
+// positioned, because the table's `overflow-x-auto` wrapper would clip it.
+function ActionsMenu({ items, busy, iconClass }: { items: ActionsMenuItem[]; busy?: boolean; iconClass: string }) {
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; right: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!pos) return;
+    const close = () => setPos(null);
+    const onKeyDown = (e: KeyboardEvent) => e.key === 'Escape' && close();
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [pos]);
+
+  const toggle = () => {
+    if (pos) return setPos(null);
+    const rect = buttonRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const right = window.innerWidth - rect.right;
+    const estimatedHeight = items.length * 44 + 16;
+    // Flip upward when there isn't room below (last rows of the table).
+    setPos(rect.bottom + estimatedHeight + 8 > window.innerHeight
+      ? { bottom: window.innerHeight - rect.top + 4, right }
+      : { top: rect.bottom + 4, right });
+  };
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        onClick={toggle}
+        disabled={busy}
+        className="p-2 text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors disabled:cursor-not-allowed"
+        title="Mais ações"
+        aria-haspopup="menu"
+        aria-expanded={!!pos}
+      >
+        {busy ? <RefreshCw className={`${iconClass} animate-spin`} /> : <MoreVertical className={iconClass} />}
+      </button>
+      {pos && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setPos(null)} />
+          <div
+            role="menu"
+            style={{ top: pos.top, bottom: pos.bottom, right: pos.right }}
+            className="fixed z-50 w-64 py-1 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 shadow-xl text-left"
+          >
+            {items.map((item) => (
+              <React.Fragment key={item.label}>
+                {item.separatorBefore && <div className="my-1 border-t border-gray-100 dark:border-gray-700" />}
+                <button
+                  role="menuitem"
+                  disabled={item.disabled}
+                  onClick={() => {
+                    setPos(null);
+                    item.onClick();
+                  }}
+                  className={`w-full flex items-start gap-3 px-4 py-2 text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                    item.danger
+                      ? 'text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 disabled:hover:bg-transparent'
+                      : 'text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-700/50 disabled:hover:bg-transparent'
+                  }`}
+                >
+                  <span className="mt-0.5 shrink-0">{item.icon}</span>
+                  <span>
+                    {item.label}
+                    {item.hint && <span className="block text-xs text-gray-400 dark:text-gray-500">{item.hint}</span>}
+                  </span>
+                </button>
+              </React.Fragment>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
 }
 
 export default function Contracts() {
@@ -36,6 +131,9 @@ export default function Contracts() {
   const [selectedContractForHistory, setSelectedContractForHistory] = useState<Contract | null>(null);
   const [contractPayments, setContractPayments] = useState<Payment[]>([]);
   const [uploadingContractId, setUploadingContractId] = useState<string | null>(null);
+  // Set while the modal is editing an existing (unsigned) contract instead of creating one.
+  const [editingContract, setEditingContract] = useState<Contract | null>(null);
+  const [notifyOnEdit, setNotifyOnEdit] = useState(false);
 
   // Filters and Pagination
   const [searchQuery, setSearchQuery] = useState('');
@@ -266,14 +364,47 @@ export default function Contracts() {
     if (!profile) return;
 
     try {
-      await apiFetch('/api/contracts', { method: 'POST', body: JSON.stringify(formData) });
-      toast.success('Contrato e cobranças gerados com sucesso!');
-      setIsModalOpen(false);
+      if (editingContract) {
+        await apiFetch(`/api/contracts/${editingContract.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ ...formData, notify: notifyOnEdit }),
+        });
+        toast.success(notifyOnEdit
+          ? 'Contrato atualizado e notificação enviada! Gere o PDF novamente para obter a versão corrigida.'
+          : 'Contrato atualizado! Gere o PDF novamente para obter a versão corrigida.');
+      } else {
+        await apiFetch('/api/contracts', { method: 'POST', body: JSON.stringify(formData) });
+        toast.success('Contrato e cobranças gerados com sucesso!');
+      }
+      closeModal();
       await Promise.all([fetchContracts(), apiFetch<Property[]>('/api/properties').then(setProperties)]);
-    } catch (error) {
-      console.error('Failed to create contract:', error);
-      toast.error('Erro ao criar contrato.');
+    } catch (error: any) {
+      console.error('Failed to save contract:', error);
+      toast.error(error?.message || (editingContract ? 'Erro ao atualizar contrato.' : 'Erro ao criar contrato.'));
     }
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setEditingContract(null);
+    setNotifyOnEdit(false);
+  };
+
+  const openEditModal = (contract: Contract) => {
+    setEditingContract(contract);
+    setNotifyOnEdit(false);
+    setFormData({
+      propertyId: contract.propertyId,
+      tenantUid: contract.tenantUid,
+      landlordUid: contract.landlordUid,
+      startDate: contract.startDate,
+      endDate: contract.endDate,
+      dueDay: contract.dueDay,
+      monthlyRent: contract.monthlyRent,
+      lateFeeEnabled: contract.lateFeeEnabled,
+      status: contract.status,
+    });
+    setIsModalOpen(true);
   };
 
   useEffect(() => {
@@ -393,6 +524,124 @@ export default function Contracts() {
   const totalPages = Math.ceil(filteredContracts.length / itemsPerPage);
   const paginatedContracts = filteredContracts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
+  const handleResendEmail = (contract: Contract) => {
+    apiFetch(`/api/contracts/${contract.id}/notify`, { method: 'POST' })
+      .then(() => toast.success('E-mail de notificação enviado!'))
+      .catch((error) => {
+        console.error('Failed to resend contract email:', error);
+        toast.error('Erro ao enviar e-mail.');
+      });
+  };
+
+  // Only active contracts carry a signature state; cancelled/renewed ones are history.
+  const renderSignatureBadge = (contract: Contract) => {
+    if (contract.status !== 'active') return null;
+    return contract.signedContractUrl ? (
+      <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+        Assinado
+      </span>
+    ) : (
+      <span className="px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+        Aguardando assinatura
+      </span>
+    );
+  };
+
+  // Shared by the desktop table and the mobile cards. Always visible: PDF, edit (while
+  // unsigned) / signed copy; everything else lives in the "more" menu. `idPrefix` keeps
+  // the hidden file input ids unique since both layouts are in the DOM at once.
+  const renderActions = (contract: Contract, idPrefix: string, iconClass: string) => {
+    const canManage = (isAdmin || isLandlord) && contract.status === 'active';
+    const canEdit = canManage && !contract.signedContractUrl;
+    const uploading = uploadingContractId === contract.id;
+    const uploadInputId = `${idPrefix}${contract.id}`;
+    const renewable = isRenewable(contract);
+
+    const menuItems: ActionsMenuItem[] = [
+      {
+        label: 'Histórico de pagamentos',
+        icon: <History className="w-4 h-4" />,
+        onClick: () => setSelectedContractForHistory(contract),
+      },
+      ...(canEdit ? [{
+        label: 'Anexar contrato assinado',
+        icon: <Upload className="w-4 h-4" />,
+        onClick: () => document.getElementById(uploadInputId)?.click(),
+        disabled: uploading,
+      }] : []),
+      ...(canManage ? [
+        {
+          label: 'Reenviar e-mail',
+          icon: <Mail className="w-4 h-4" />,
+          onClick: () => handleResendEmail(contract),
+        },
+        // While unsigned, late fee is set in the edit modal; once signed there's no edit.
+        ...(contract.signedContractUrl ? [{
+          label: contract.lateFeeEnabled ? 'Desativar multa/juros automáticos' : 'Ativar multa/juros automáticos',
+          icon: <Percent className="w-4 h-4" />,
+          onClick: () => handleToggleLateFee(contract),
+        }] : []),
+        {
+          label: 'Renovar contrato',
+          icon: <RefreshCw className="w-4 h-4" />,
+          onClick: () => openRenewModal(contract),
+          disabled: !renewable,
+          hint: renewable ? undefined : `Disponível a partir de ${renewalWindowDays} dias antes do vencimento`,
+        },
+        {
+          label: 'Cancelar contrato',
+          icon: <XCircle className="w-4 h-4" />,
+          onClick: () => setContractToCancel(contract),
+          danger: true,
+          separatorBefore: true,
+        },
+      ] : []),
+    ];
+
+    return (
+      <>
+        <button
+          onClick={() => generatePDF(contract)}
+          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+          title="Baixar PDF"
+        >
+          <Download className={iconClass} />
+        </button>
+        {contract.signedContractUrl && (
+          <a
+            href={contract.signedContractUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+            title="Ver Contrato Assinado"
+          >
+            <CheckCircle2 className={iconClass} />
+          </a>
+        )}
+        {canEdit && (
+          <>
+            <button
+              onClick={() => openEditModal(contract)}
+              className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+              title="Editar Contrato"
+            >
+              <Pencil className={iconClass} />
+            </button>
+            <input
+              type="file"
+              id={uploadInputId}
+              className="hidden"
+              accept=".pdf,image/jpeg,image/png"
+              onChange={(e) => handleFileUpload(e, contract.id)}
+              disabled={uploading}
+            />
+          </>
+        )}
+        <ActionsMenu items={menuItems} busy={uploading} iconClass={iconClass} />
+      </>
+    );
+  };
+
   if (loading) return <ContractsTableSkeleton />;
 
   return (
@@ -405,7 +654,16 @@ export default function Contracts() {
         {(isAdmin || isLandlord) && (
           <button
             onClick={() => {
-              setFormData(prev => ({ ...prev, landlordUid: isLandlord ? profile.uid : '' }));
+              setFormData({
+                propertyId: '',
+                tenantUid: '',
+                landlordUid: isLandlord ? profile.uid : '',
+                startDate: format(new Date(), 'yyyy-MM-dd'),
+                endDate: format(addMonths(new Date(), 12), 'yyyy-MM-dd'),
+                dueDay: 10,
+                monthlyRent: 0,
+                status: 'pending',
+              });
               setIsModalOpen(true);
             }}
             className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
@@ -488,6 +746,7 @@ export default function Contracts() {
                       <span className="text-sm font-bold text-gray-900 dark:text-white">{formatCurrency(contract.monthlyRent)}</span>
                     </td>
                     <td className="px-6 py-4">
+                      <div className="flex flex-col items-start gap-1">
                       <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         contract.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 
                         contract.status === 'cancelled' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
@@ -497,107 +756,12 @@ export default function Contracts() {
                          contract.status === 'cancelled' ? 'Cancelado' :
                          contract.status === 'renewed' ? 'Renovado' : contract.status}
                       </span>
+                        {renderSignatureBadge(contract)}
+                      </div>
                     </td>
                     <td className="px-6 py-4 text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <button
-                          onClick={() => generatePDF(contract)}
-                          className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                          title="Baixar PDF"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-
-                        <button
-                          onClick={() => setSelectedContractForHistory(contract)}
-                          className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
-                          title="Histórico de Pagamentos"
-                        >
-                          <History className="w-4 h-4" />
-                        </button>
-                        
-                        {contract.signedContractUrl ? (
-                          <a
-                            href={contract.signedContractUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
-                            title="Ver Contrato Assinado"
-                          >
-                            <CheckCircle2 className="w-4 h-4" />
-                          </a>
-                        ) : (isAdmin || isLandlord) && contract.status === 'active' ? (
-                          <div className="relative">
-                            <input
-                              type="file"
-                              id={`upload-${contract.id}`}
-                              className="hidden"
-                              accept=".pdf,image/jpeg,image/png"
-                              onChange={(e) => handleFileUpload(e, contract.id)}
-                              disabled={uploadingContractId === contract.id}
-                            />
-                            <label
-                              htmlFor={`upload-${contract.id}`}
-                              className={`p-2 rounded-lg transition-colors cursor-pointer flex items-center justify-center ${
-                                uploadingContractId === contract.id 
-                                  ? 'text-gray-400 bg-gray-50 dark:bg-gray-700 cursor-not-allowed' 
-                                  : 'text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30'
-                              }`}
-                              title="Anexar Contrato Assinado"
-                            >
-                              {uploadingContractId === contract.id ? (
-                                <RefreshCw className="w-4 h-4 animate-spin" />
-                              ) : (
-                                <Upload className="w-4 h-4" />
-                              )}
-                            </label>
-                          </div>
-                        ) : null}
-
-                        {(isAdmin || isLandlord) && contract.status === 'active' && (
-                          <>
-                            <button
-                              onClick={() => {
-                                apiFetch(`/api/contracts/${contract.id}/notify`, { method: 'POST' })
-                                  .then(() => toast.success('E-mail de notificação enviado!'))
-                                  .catch((error) => {
-                                    console.error('Failed to resend contract email:', error);
-                                    toast.error('Erro ao enviar e-mail.');
-                                  });
-                              }}
-                              className="p-2 text-gray-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors"
-                              title="Reenviar E-mail"
-                            >
-                              <Mail className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => handleToggleLateFee(contract)}
-                              className={`p-2 rounded-lg transition-colors ${
-                                contract.lateFeeEnabled
-                                  ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400'
-                                  : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30'
-                              }`}
-                              title={contract.lateFeeEnabled ? 'Multa/juros automáticos ativados (clique para desativar)' : 'Ativar multa/juros automáticos em atrasos'}
-                            >
-                              <Percent className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => isRenewable(contract) && openRenewModal(contract)}
-                              disabled={!isRenewable(contract)}
-                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
-                              title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
-                            >
-                              <RefreshCw className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => setContractToCancel(contract)}
-                              className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                              title="Cancelar Contrato"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          </>
-                        )}
+                        {renderActions(contract, 'upload-', 'w-4 h-4')}
                       </div>
                     </td>
                   </tr>
@@ -624,6 +788,7 @@ export default function Contracts() {
                       <p className="text-xs text-gray-500 dark:text-gray-400">{tenant?.displayName || 'N/A'}</p>
                     </div>
                   </div>
+                  <div className="flex flex-col items-end gap-1">
                   <span className={`px-2 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                     contract.status === 'active' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 
                     contract.status === 'cancelled' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
@@ -633,6 +798,8 @@ export default function Contracts() {
                      contract.status === 'cancelled' ? 'Cancelado' :
                      contract.status === 'renewed' ? 'Renovado' : contract.status}
                   </span>
+                    {renderSignatureBadge(contract)}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 py-2 border-y border-gray-50 dark:border-gray-700/50">
@@ -648,81 +815,8 @@ export default function Contracts() {
                   </div>
                 </div>
 
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1">
-                    <button
-                      onClick={() => generatePDF(contract)}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
-                      title="Baixar PDF"
-                    >
-                      <Download className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() => setSelectedContractForHistory(contract)}
-                      className="p-2 text-gray-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors"
-                      title="Histórico de Pagamentos"
-                    >
-                      <History className="w-5 h-5" />
-                    </button>
-                    {contract.signedContractUrl && (
-                      <a
-                        href={contract.signedContractUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="p-2 text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
-                      >
-                        <CheckCircle2 className="w-5 h-5" />
-                      </a>
-                    )}
-                  </div>
-
-                  {(isAdmin || isLandlord) && contract.status === 'active' && (
-                    <div className="flex items-center gap-1">
-                      {!contract.signedContractUrl && (
-                        <div className="relative">
-                          <input
-                            type="file"
-                            id={`upload-mobile-${contract.id}`}
-                            className="hidden"
-                            accept=".pdf,image/jpeg,image/png"
-                            onChange={(e) => handleFileUpload(e, contract.id)}
-                            disabled={uploadingContractId === contract.id}
-                          />
-                          <label
-                            htmlFor={`upload-mobile-${contract.id}`}
-                            className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg cursor-pointer flex items-center justify-center"
-                          >
-                            {uploadingContractId === contract.id ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Upload className="w-5 h-5" />}
-                          </label>
-                        </div>
-                      )}
-                      <button
-                        onClick={() => handleToggleLateFee(contract)}
-                        className={`p-2 rounded-lg transition-colors ${
-                          contract.lateFeeEnabled
-                            ? 'text-amber-600 bg-amber-50 dark:bg-amber-900/30 dark:text-amber-400'
-                            : 'text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/30'
-                        }`}
-                        title={contract.lateFeeEnabled ? 'Multa/juros automáticos ativados' : 'Ativar multa/juros automáticos'}
-                      >
-                        <Percent className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => isRenewable(contract) && openRenewModal(contract)}
-                        disabled={!isRenewable(contract)}
-                        title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
-                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
-                      >
-                        <RefreshCw className="w-5 h-5" />
-                      </button>
-                      <button
-                        onClick={() => setContractToCancel(contract)}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                      >
-                        <XCircle className="w-5 h-5" />
-                      </button>
-                    </div>
-                  )}
+                <div className="flex items-center justify-end gap-1">
+                  {renderActions(contract, 'upload-mobile-', 'w-5 h-5')}
                 </div>
               </div>
             );
@@ -770,8 +864,8 @@ export default function Contracts() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between bg-gray-50 dark:bg-gray-900/50">
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white">Novo Contrato</h3>
-              <button onClick={() => setIsModalOpen(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">{editingContract ? 'Editar Contrato' : 'Novo Contrato'}</h3>
+              <button onClick={closeModal} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
                 <X className="w-6 h-6" />
               </button>
             </div>
@@ -788,7 +882,7 @@ export default function Contracts() {
                   className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
                 >
                   <option value="">Selecione um imóvel</option>
-                  {properties.filter(p => p.status === 'available').map(p => (
+                  {properties.filter(p => p.status === 'available' || p.id === editingContract?.propertyId).map(p => (
                     <option key={p.id} value={p.id}>{p.address}</option>
                   ))}
                 </select>
@@ -879,10 +973,24 @@ export default function Contracts() {
                   <span className="block text-xs text-gray-400 dark:text-gray-500">2% de multa + 1% ao mês de juros, proporcional aos dias de atraso (apenas exibido — não altera o valor da parcela).</span>
                 </span>
               </label>
+              {editingContract && (
+                <label className="flex items-start gap-2.5 pt-1 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={notifyOnEdit}
+                    onChange={(e) => setNotifyOnEdit(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-gray-600 dark:text-gray-300">
+                    Avisar o inquilino e o locador por e-mail sobre a alteração
+                    <span className="block text-xs text-gray-400 dark:text-gray-500">Se alterar inquilino, datas, vencimento ou valor, as cobranças pendentes serão recriadas.</span>
+                  </span>
+                </label>
+              )}
               <div className="pt-4 flex gap-3">
                 <button
                   type="button"
-                  onClick={() => setIsModalOpen(false)}
+                  onClick={closeModal}
                   className="flex-1 px-4 py-2 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
                 >
                   Cancelar
@@ -891,7 +999,7 @@ export default function Contracts() {
                   type="submit"
                   className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-colors shadow-lg shadow-blue-100 dark:shadow-none"
                 >
-                  Criar Contrato
+                  {editingContract ? 'Salvar Alterações' : 'Criar Contrato'}
                 </button>
               </div>
             </form>
