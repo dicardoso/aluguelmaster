@@ -34,32 +34,14 @@ Stack: React + Vite + Tailwind no front-end, Express + Prisma (Postgres/Neon) no
 
 | Variável | Uso |
 |---|---|
-| `APP_ENV` | Ambiente: `production`, `develop` (homologação) ou `local`. Vazio vale `local` |
 | `DATABASE_URL` | Connection string do Postgres (Neon) |
-| `PRODUCTION_DATABASE_HOST` | Opcional (develop/local): endpoint do banco de produção; o servidor recusa subir se o `DATABASE_URL` o contiver |
 | `SETTINGS_ENCRYPTION_KEY` | Chave usada para criptografar a senha SMTP salva no banco |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Envio de e-mails (contratos, lembretes, boas-vindas) |
 | `APP_URL` | URL pública do app, usada em links de e-mail |
-| `VITE_FIREBASE_*` | Config web do Firebase (`API_KEY`, `AUTH_DOMAIN`, `PROJECT_ID`, `STORAGE_BUCKET`, `MESSAGING_SENDER_ID`, `APP_ID`) |
 
 `GEMINI_API_KEY` no `.env.example` é resíduo do template original (AI Studio) e não é usado pelo código atual — pode ser ignorado.
 
-O login (Google) e o upload de arquivos assinados de contrato usam Firebase. Em produção, se as `VITE_FIREBASE_*` não estiverem definidas, vale o `firebase-applet-config.json` (config pública do client, não é segredo). Em `develop` e `local` as variáveis são obrigatórias — o app não sobe sem elas. A exceção é `VITE_FIREBASE_STORAGE_BUCKET`: se ficar vazia (projeto Firebase gratuito, sem Storage), o upload de contrato assinado fica oculto nesse ambiente.
-
-## Ambientes
-
-| | Produção | Homologação | Local |
-|---|---|---|---|
-| Branch Git | `master` | `develop` | branches de feature |
-| `APP_ENV` | `production` | `develop` | `local` |
-| Banco (Neon) | branch `main` | branch `develop` | branch `local` |
-| Firebase | projeto de produção | projeto de homologação | projeto de homologação |
-| Hospedagem | Vercel (Production) | Vercel (Preview do branch `develop`) | `yarn dev` |
-| E-mails | enviados | **suprimidos** (só log) | **suprimidos** (só log) |
-
-Fora de produção os e-mails nunca são enviados (o banco pode conter endereços reais copiados de produção) e um selo "HOMOLOGAÇÃO"/"LOCAL" aparece no canto da tela.
-
-Fluxo: feature → PR para `develop` → validar na homologação → PR de `develop` para `master` (usar *merge commit*, não squash). Migrations são aplicadas nesta ordem: banco `local`, banco `develop`, banco de produção — este último **antes** de o código novo entrar no ar.
+O login (Google) e o upload de arquivos assinados de contrato usam Firebase, configurado em `firebase-applet-config.json` (config pública do client, não é segredo).
 
 ## Scripts
 
@@ -92,6 +74,5 @@ Detalhes completos da arquitetura (auth, rotas, serialização, etc.) estão em 
 O projeto já está configurado para rodar na Vercel:
 
 - `vercel.json` define o build (`yarn build` → `dist/`) e reescreve `/api/*` para a function serverless em `api/index.ts`, que reaproveita o mesmo Express app usado em desenvolvimento (`src/server/app.ts`).
-- Configure as variáveis de ambiente listadas acima em **Project Settings → Environment Variables**, com valores distintos por ambiente: `APP_ENV=production` em Production; `APP_ENV=develop` em Preview, restrito ao branch `develop`. `DATABASE_URL`, `SETTINGS_ENCRYPTION_KEY` e `VITE_FIREBASE_*` também devem ser diferentes entre os dois.
-- Defina **Production Branch = `master`** em *Settings → Git*.
-- Se o login com Google não funcionar após o deploy, adicione o domínio do deploy em **Firebase Console → Authentication → Settings → Authorized domains** (do projeto Firebase correspondente ao ambiente; não há curinga — use um domínio fixo para o branch `develop`).
+- Configure as variáveis de ambiente listadas acima em **Project Settings → Environment Variables** (Production e Preview).
+- Se o login com Google não funcionar após o deploy, adicione o domínio do deploy em **Firebase Console → Authentication → Settings → Authorized domains**.

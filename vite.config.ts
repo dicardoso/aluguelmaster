@@ -7,9 +7,6 @@ export default defineConfig(({mode}) => {
   const env = loadEnv(mode, '.', '');
   return {
     plugins: [react(), tailwindcss()],
-    // Besides the default VITE_ prefix, expose APP_ENV to the client (env badge,
-    // Firebase config selection). Nothing else starts with this prefix.
-    envPrefix: ['VITE_', 'APP_ENV'],
     define: {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },

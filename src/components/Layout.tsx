@@ -3,7 +3,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { logout } from '../firebase';
 import { apiFetch } from '../lib/api';
-import { EnvBadge } from './EnvBadge';
 import { Property, Contract } from '../types';
 import { LayoutDashboard, Building2, FileText, CreditCard, LogOut, User, Users, Settings as SettingsIcon, Moon, Sun, Monitor, Menu, X, Search, Plus, Home, UserRound } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -117,7 +116,6 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-screen bg-gray-50 dark:bg-gray-900 font-sans transition-colors duration-200 overflow-hidden">
-      <EnvBadge />
       {/* Mobile Overlay */}
       {isMobileMenuOpen && (
         <div

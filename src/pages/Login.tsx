@@ -2,7 +2,6 @@ import { signIn } from '../firebase';
 import { useNavigate } from 'react-router-dom';
 import { Building2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { EnvBadge } from '../components/EnvBadge';
 
 export default function Login() {
   const navigate = useNavigate();
@@ -20,7 +19,6 @@ export default function Login() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-4 transition-colors">
-      <EnvBadge />
       <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-100 dark:border-gray-700">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-200 dark:shadow-none">

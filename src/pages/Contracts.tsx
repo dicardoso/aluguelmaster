@@ -338,11 +338,6 @@ export default function Contracts() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, contractId: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!storage) {
-      toast.error('Upload de arquivos indisponível neste ambiente.');
-      e.target.value = '';
-      return;
-    }
 
     // Validate file type (PDF or images)
     const validTypes = ['application/pdf', 'image/jpeg', 'image/png'];
@@ -531,7 +526,7 @@ export default function Contracts() {
                           >
                             <CheckCircle2 className="w-4 h-4" />
                           </a>
-                        ) : storage && (isAdmin || isLandlord) && contract.status === 'active' ? (
+                        ) : (isAdmin || isLandlord) && contract.status === 'active' ? (
                           <div className="relative">
                             <input
                               type="file"
@@ -683,7 +678,7 @@ export default function Contracts() {
 
                   {(isAdmin || isLandlord) && contract.status === 'active' && (
                     <div className="flex items-center gap-1">
-                      {storage && !contract.signedContractUrl && (
+                      {!contract.signedContractUrl && (
                         <div className="relative">
                           <input
                             type="file"
