@@ -50,7 +50,7 @@ router.put('/', requireRole('admin'), async (req, res) => {
     where: { id: 'global' },
     create: {
       id: 'global',
-      appName: appName || 'Contrato Fácil',
+      appName: appName || 'Locatto',
       companyName,
       supportEmail,
       smtpHost,

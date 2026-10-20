@@ -10,7 +10,7 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<AppSettings>({
-    appName: 'Contrato Fácil',
+    appName: 'Locatto',
     companyName: '',
     supportEmail: '',
     smtpHost: '',
@@ -109,7 +109,7 @@ export default function Settings() {
                 value={formData.appName}
                 onChange={(e) => setFormData({ ...formData, appName: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
-                placeholder="Ex: Contrato Fácil"
+                placeholder="Ex: Locatto"
               />
             </div>
             <div>
