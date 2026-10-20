@@ -12,6 +12,7 @@ import { prisma } from "./prisma.js";
 import { sendMail, emailLayout, emailDetailsTable, emailBadge } from "./mailer.js";
 import { requireAuth, loadProfile, requireRole } from "./auth.js";
 import { formatCurrency } from "../lib/format.js";
+import { appEnv, isProduction } from "./env.js";
 
 // Builds the Express app with every /api route wired up, independent of how the
 // process is hosted (a long-lived `app.listen()` in local dev, or a single
@@ -24,17 +25,26 @@ export function createApp() {
   // Initialize Firebase Admin (still needed to verify Google Sign-In ID tokens).
   // Guarded against re-initialization because a warm serverless instance can call
   // createApp() more than once.
+  // Only the projectId is needed: verifyIdToken checks the signature against Google's
+  // public keys and that the token was issued for this project, so a develop token is
+  // rejected by the production server and vice-versa. Same variable as the client uses.
+  // The committed production config is a fallback for production only (see src/firebase.ts).
   if (!admin.apps.length) {
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    let firebaseConfig: any = {};
-    if (fs.existsSync(configPath)) {
-      firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    let projectId = process.env.VITE_FIREBASE_PROJECT_ID;
+
+    if (!projectId && isProduction) {
+      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+      if (fs.existsSync(configPath)) {
+        projectId = JSON.parse(fs.readFileSync(configPath, "utf-8")).projectId;
+      }
     }
 
-    if (firebaseConfig.projectId) {
-      admin.initializeApp({
-        projectId: firebaseConfig.projectId,
-      });
+    if (projectId) {
+      admin.initializeApp({ projectId });
+    } else if (!isProduction) {
+      throw new Error(
+        `Firebase is not configured for APP_ENV=${appEnv}: set VITE_FIREBASE_PROJECT_ID (see .env.example).`
+      );
     }
   }
 
