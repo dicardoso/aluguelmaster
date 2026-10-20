@@ -141,6 +141,11 @@ model Settings {
   smtpUser               String?
   smtpPasswordEncrypted  String? // server-only — never returned to the client, plain or encrypted
   emailFrom              String?
+  // Alert/renewal thresholds, all in days — configurable so an admin can tune them without
+  // a code change. Defaults match what used to be hardcoded in app.ts / contracts.ts.
+  contractExpiryReminderDays Int @default(30)
+  paymentDueReminderDays     Int @default(3)
+  renewalWindowDays          Int @default(60)
   updatedAt              DateTime @updatedAt
 
   @@map("settings")

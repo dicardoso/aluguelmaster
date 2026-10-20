@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma.js';
 import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js';
 import { serializeContract } from '../serialize.js';
-import { sendMail } from '../mailer.js';
+import { sendMail, emailLayout, emailDetailsTable } from '../mailer.js';
 import { formatCurrency } from '../../lib/format.js';
 
 const router = Router();
@@ -53,34 +53,104 @@ async function createPaymentsForContract(tx: Prisma.TransactionClient, contract:
   }
 }
 
-async function sendContractEmail(contract: { propertyId: string; tenantUid: string; monthlyRent: any; dueDay: number; startDate: Date; endDate: Date }, type: 'new' | 'renew') {
-  const [tenant, property] = await Promise.all([
+function formatContractPeriod(contract: { startDate: Date; endDate: Date }) {
+  return `${contract.startDate.toISOString().slice(0, 10).split('-').reverse().join('/')} até ${contract.endDate.toISOString().slice(0, 10).split('-').reverse().join('/')}`;
+}
+
+async function sendContractEmail(
+  contract: { propertyId: string; tenantUid: string; landlordUid: string; monthlyRent: any; dueDay: number; startDate: Date; endDate: Date },
+  type: 'new' | 'renew',
+) {
+  const [tenant, landlord, property, settings] = await Promise.all([
     prisma.user.findUnique({ where: { id: contract.tenantUid } }),
+    prisma.user.findUnique({ where: { id: contract.landlordUid } }),
     prisma.property.findUnique({ where: { id: contract.propertyId } }),
+    prisma.settings.findUnique({ where: { id: 'global' } }),
   ]);
-  if (!tenant?.email) return;
 
-  const subject = type === 'new'
-    ? `Novo Contrato de Locação - ${property?.address}`
-    : `Renovação de Contrato de Locação - ${property?.address}`;
+  const appName = settings?.appName || 'AluguelMaster';
+  const appUrl = process.env.APP_URL || '';
+  const actionLabel = type === 'new' ? 'gerado' : 'renovado';
+  const details = emailDetailsTable([
+    ['Valor Mensal', formatCurrency(Number(contract.monthlyRent))],
+    ['Vencimento', `Todo dia ${contract.dueDay || 10}`],
+    ['Período', formatContractPeriod(contract)],
+  ]);
 
-  const html = `
-    <h1>Olá ${tenant.displayName},</h1>
-    <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${type === 'new' ? 'gerado' : 'renovado'} com sucesso.</p>
-    <p><strong>Detalhes:</strong></p>
-    <ul>
-      <li>Valor Mensal: ${formatCurrency(Number(contract.monthlyRent))}</li>
-      <li>Vencimento: Todo dia ${contract.dueDay || 10}</li>
-      <li>Período: ${contract.startDate.toISOString().slice(0, 10).split('-').reverse().join('/')} até ${contract.endDate.toISOString().slice(0, 10).split('-').reverse().join('/')}</li>
-    </ul>
-    <p>Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.</p>
-    <p>Atenciosamente,<br>Gestão Imobiliária</p>
-  `;
+  if (tenant?.email) {
+    const subject = type === 'new'
+      ? `Novo Contrato de Locação - ${property?.address}`
+      : `Renovação de Contrato de Locação - ${property?.address}`;
 
-  try {
-    await sendMail({ to: tenant.email, subject, html });
-  } catch (error) {
-    console.error('Contract email error:', error);
+    const html = emailLayout({
+      appName,
+      heading: type === 'new' ? 'Seu contrato foi gerado 📄' : 'Seu contrato foi renovado 🔄',
+      bodyHtml: `
+        <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${actionLabel} com sucesso.</p>
+        ${details}
+        <p>Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.</p>
+      `,
+      ctaLabel: 'Ver Contrato',
+      ctaUrl: appUrl || undefined,
+    });
+
+    try {
+      await sendMail({ to: tenant.email, subject, html });
+    } catch (error) {
+      console.error('Contract email error (tenant):', error);
+    }
+  }
+
+  if (landlord?.email) {
+    const html = emailLayout({
+      appName,
+      heading: `Contrato ${actionLabel} ✅`,
+      bodyHtml: `
+        <p>O contrato de locação do imóvel em <strong>${property?.address}</strong> com o inquilino <strong>${tenant?.displayName || 'N/A'}</strong> foi ${actionLabel} com sucesso.</p>
+        ${details}
+        <p>Acesse a plataforma para ver os detalhes completos e o histórico de pagamentos.</p>
+      `,
+      ctaLabel: 'Ver Contrato',
+      ctaUrl: appUrl || undefined,
+    });
+
+    try {
+      await sendMail({ to: landlord.email, subject: `Contrato ${actionLabel} - ${property?.address}`, html });
+    } catch (error) {
+      console.error('Contract email error (landlord):', error);
+    }
+  }
+}
+
+async function sendContractCancelledEmail(contract: { propertyId: string; tenantUid: string; landlordUid: string }) {
+  const [tenant, landlord, property, settings] = await Promise.all([
+    prisma.user.findUnique({ where: { id: contract.tenantUid } }),
+    prisma.user.findUnique({ where: { id: contract.landlordUid } }),
+    prisma.property.findUnique({ where: { id: contract.propertyId } }),
+    prisma.settings.findUnique({ where: { id: 'global' } }),
+  ]);
+
+  const appName = settings?.appName || 'AluguelMaster';
+  const appUrl = process.env.APP_URL || '';
+  const recipients = [tenant, landlord].filter((u): u is NonNullable<typeof u> => !!u?.email);
+
+  for (const recipient of recipients) {
+    const html = emailLayout({
+      appName,
+      heading: 'Contrato cancelado',
+      bodyHtml: `
+        <p>O contrato de locação do imóvel em <strong>${property?.address}</strong> foi cancelado.</p>
+        <p>O imóvel foi marcado como disponível na plataforma.</p>
+      `,
+      ctaLabel: 'Acessar Plataforma',
+      ctaUrl: appUrl || undefined,
+    });
+
+    try {
+      await sendMail({ to: recipient.email, subject: `Contrato cancelado - ${property?.address}`, html });
+    } catch (error) {
+      console.error('Contract cancellation email error:', error);
+    }
   }
 }
 
@@ -146,6 +216,35 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
   const existing = await loadAccessibleContract(req, res);
   if (!existing) return;
 
+  if (existing.status !== 'active') {
+    res.status(400).json({ error: 'Apenas contratos ativos podem ser renovados.' });
+    return;
+  }
+
+  // A contract can only be renewed once it's close to expiring — renewing a contract
+  // that just started made no sense and let stale double-renewals slip through.
+  const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
+  const renewalWindowDays = settings?.renewalWindowDays ?? 60;
+
+  const daysUntilEnd = (existing.endDate.getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+  if (daysUntilEnd > renewalWindowDays) {
+    res.status(400).json({
+      error: `Este contrato só pode ser renovado a partir de ${renewalWindowDays} dias antes do vencimento (faltam ${Math.ceil(daysUntilEnd)} dias).`,
+    });
+    return;
+  }
+
+  const { monthlyRent } = req.body ?? {};
+  let newMonthlyRent = existing.monthlyRent;
+  if (monthlyRent !== undefined) {
+    const parsed = Number(monthlyRent);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      res.status(400).json({ error: 'Valor de aluguel inválido.' });
+      return;
+    }
+    newMonthlyRent = parsed as any;
+  }
+
   const newStartDate = existing.endDate;
   const newEndDate = new Date(Date.UTC(
     newStartDate.getUTCFullYear() + 1, newStartDate.getUTCMonth(), newStartDate.getUTCDate()
@@ -160,7 +259,7 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
         startDate: newStartDate,
         endDate: newEndDate,
         dueDay: existing.dueDay,
-        monthlyRent: existing.monthlyRent,
+        monthlyRent: newMonthlyRent,
         status: 'active',
         lateFeeEnabled: existing.lateFeeEnabled,
         // Deliberately not copied: pdfUrl / signedAt / signedContractUrl — a renewed
@@ -186,6 +285,8 @@ router.post('/:id/cancel', requireRole('admin', 'landlord'), async (req: AuthedR
     await tx.property.update({ where: { id: existing.propertyId }, data: { status: 'available' } });
     return cancelled;
   });
+
+  sendContractCancelledEmail(updated).catch((error) => console.error('Failed to send cancellation email:', error));
 
   res.json(serializeContract(updated));
 });

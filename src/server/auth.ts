@@ -44,7 +44,8 @@ export function invalidateProfileCache(uid: string) {
 }
 
 // Loads (or bootstraps) the caller's Postgres profile. Mirrors the logic that used to live in
-// useAuth.tsx: migrate a pre-registered invite by email, or create a default tenant profile.
+// useAuth.tsx: migrate a pre-registered invite by email. Anyone without a matching invite is
+// rejected — access is invite-only, there is no self-serve tenant signup.
 export async function loadProfile(req: AuthedRequest, res: Response, next: NextFunction) {
   if (!req.firebaseUser) {
     res.status(401).json({ error: 'Not authenticated' });
@@ -68,38 +69,32 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
       ? await prisma.user.findFirst({ where: { email: normalizedEmail, isInvite: true } })
       : null;
 
-    if (preRegistration) {
-      profile = await prisma.$transaction(async (tx) => {
-        const migrated = await tx.user.create({
-          data: {
-            id: uid,
-            email: normalizedEmail,
-            displayName: displayName || preRegistration.displayName,
-            role: preRegistration.role,
-            phone: preRegistration.phone,
-            cpf: preRegistration.cpf,
-            address: preRegistration.address,
-            themePreference: preRegistration.themePreference,
-          },
-        });
-        await tx.user.delete({ where: { id: preRegistration.id } });
-        return migrated;
-      });
-    } else {
-      profile = await prisma.user.create({
+    if (!preRegistration) {
+      res.status(403).json({ error: 'Nenhum convite encontrado para este e-mail. Solicite acesso a um administrador.' });
+      return;
+    }
+
+    profile = await prisma.$transaction(async (tx) => {
+      const migrated = await tx.user.create({
         data: {
           id: uid,
           email: normalizedEmail,
-          displayName: displayName || '',
-          role: 'tenant',
+          displayName: displayName || preRegistration.displayName,
+          role: preRegistration.role,
+          phone: preRegistration.phone,
+          cpf: preRegistration.cpf,
+          address: preRegistration.address,
+          themePreference: preRegistration.themePreference,
         },
       });
+      await tx.user.delete({ where: { id: preRegistration.id } });
+      return migrated;
+    });
 
-      if (normalizedEmail) {
-        sendWelcomeEmail(normalizedEmail, displayName || '').catch((error) => {
-          console.error('Failed to send welcome email:', error);
-        });
-      }
+    if (normalizedEmail) {
+      sendWelcomeEmail(normalizedEmail, displayName || '').catch((error) => {
+        console.error('Failed to send welcome email:', error);
+      });
     }
   }
 

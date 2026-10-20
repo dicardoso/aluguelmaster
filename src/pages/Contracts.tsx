@@ -15,14 +15,23 @@ import autoTable from 'jspdf-autotable';
 import { ConfirmModal } from '../components/ConfirmModal';
 import ContractsTableSkeleton from '../components/ContractsTableSkeleton';
 
+function daysUntil(dateStr: string) {
+  return (new Date(dateStr).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+}
+
 export default function Contracts() {
   const { profile, isAdmin, isLandlord } = useAuth();
+  // Server-configured (Settings page); 60 is just the fallback while it loads.
+  const [renewalWindowDays, setRenewalWindowDays] = useState(60);
+  const isRenewable = (contract: Contract) =>
+    contract.status === 'active' && daysUntil(contract.endDate) <= renewalWindowDays;
   const [contracts, setContracts] = useState<Contract[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [contractToRenew, setContractToRenew] = useState<Contract | null>(null);
+  const [renewNewRent, setRenewNewRent] = useState('');
   const [contractToCancel, setContractToCancel] = useState<Contract | null>(null);
   const [selectedContractForHistory, setSelectedContractForHistory] = useState<Contract | null>(null);
   const [contractPayments, setContractPayments] = useState<Payment[]>([]);
@@ -62,6 +71,9 @@ export default function Contracts() {
       apiFetch<Property[]>('/api/properties').then(setProperties),
       apiFetch<UserProfile[]>('/api/users/directory').then((data) => {
         setUsers(data.map((u: any) => ({ ...u, uid: u.id })));
+      }),
+      apiFetch<{ renewalWindowDays: number }>('/api/settings/thresholds').then((data) => {
+        setRenewalWindowDays(data.renewalWindowDays);
       }),
     ]).then((results) => {
       results.forEach((r) => r.status === 'rejected' && console.error('Failed to load contracts page data:', r.reason));
@@ -282,15 +294,28 @@ export default function Contracts() {
     }
   };
 
+  const openRenewModal = (contract: Contract) => {
+    setContractToRenew(contract);
+    setRenewNewRent(String(contract.monthlyRent));
+  };
+
   const handleRenew = async () => {
     if (!contractToRenew) return;
+    const monthlyRent = Number(renewNewRent);
+    if (!Number.isFinite(monthlyRent) || monthlyRent <= 0) {
+      toast.error('Informe um valor de aluguel válido.');
+      return;
+    }
     try {
-      await apiFetch(`/api/contracts/${contractToRenew.id}/renew`, { method: 'POST' });
+      await apiFetch(`/api/contracts/${contractToRenew.id}/renew`, {
+        method: 'POST',
+        body: JSON.stringify({ monthlyRent }),
+      });
       toast.success('Contrato renovado e novas cobranças geradas!');
       await fetchContracts();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to renew contract:', error);
-      toast.error('Erro ao renovar contrato.');
+      toast.error(error?.message || 'Erro ao renovar contrato.');
     } finally {
       setContractToRenew(null);
     }
@@ -557,9 +582,10 @@ export default function Contracts() {
                               <Percent className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => setContractToRenew(contract)}
-                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
-                              title="Renovar Contrato"
+                              onClick={() => isRenewable(contract) && openRenewModal(contract)}
+                              disabled={!isRenewable(contract)}
+                              className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
+                              title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
                             >
                               <RefreshCw className="w-4 h-4" />
                             </button>
@@ -682,8 +708,10 @@ export default function Contracts() {
                         <Percent className="w-5 h-5" />
                       </button>
                       <button
-                        onClick={() => setContractToRenew(contract)}
-                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+                        onClick={() => isRenewable(contract) && openRenewModal(contract)}
+                        disabled={!isRenewable(contract)}
+                        title={isRenewable(contract) ? 'Renovar Contrato' : `Renovação disponível a partir de ${renewalWindowDays} dias antes do vencimento`}
+                        className="p-2 text-gray-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400 disabled:cursor-not-allowed"
                       >
                         <RefreshCw className="w-5 h-5" />
                       </button>
@@ -879,7 +907,25 @@ export default function Contracts() {
         onConfirm={handleRenew}
         onCancel={() => setContractToRenew(null)}
         isDestructive={false}
-      />
+      >
+        <div className="mb-2">
+          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+            Valor mensal do aluguel
+          </label>
+          <input
+            type="number"
+            step="0.01"
+            min="0.01"
+            value={renewNewRent}
+            onChange={(e) => setRenewNewRent(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+            Ajuste o valor caso haja reajuste na renovação, ou mantenha o valor atual.
+          </p>
+        </div>
+      </ConfirmModal>
 
       <ConfirmModal
         isOpen={!!contractToCancel}

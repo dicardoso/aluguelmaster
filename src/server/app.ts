@@ -9,7 +9,7 @@ import paymentsRouter from "./routes/payments.js";
 import usersRouter from "./routes/users.js";
 import settingsRouter from "./routes/settings.js";
 import { prisma } from "./prisma.js";
-import { sendMail } from "./mailer.js";
+import { sendMail, emailLayout, emailDetailsTable, emailBadge } from "./mailer.js";
 import { requireAuth, loadProfile, requireRole } from "./auth.js";
 import { formatCurrency } from "../lib/format.js";
 
@@ -49,28 +49,26 @@ export function createApp() {
     res.json({ status: "ok" });
   });
 
-  app.post("/api/email/contract-notification", requireAuth, loadProfile, async (req, res) => {
-    const { to, subject, body } = req.body;
-    try {
-      await sendMail({ to, subject, html: body });
-      res.json({ success: true, message: "Email sent successfully" });
-    } catch (error) {
-      console.error("Error sending email:", error);
-      res.status(500).json({ success: false, error: "Failed to send email" });
-    }
-  });
-
   app.post("/api/reminders/process", requireAuth, loadProfile, requireRole('admin'), async (req, res) => {
     try {
       const now = new Date();
 
       const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
-      const appName = settings?.appName || 'Equipe AluguelMaster';
-      const thirtyDaysFromNow = new Date();
-      thirtyDaysFromNow.setDate(now.getDate() + 30);
+      const appName = settings?.appName || 'AluguelMaster';
+      const appUrl = process.env.APP_URL || '';
+      const contractExpiryReminderDays = settings?.contractExpiryReminderDays ?? 30;
+      const paymentDueReminderDays = settings?.paymentDueReminderDays ?? 3;
+      // Once a reminder fires, don't resend for most of the window — otherwise a tenant
+      // would get emailed daily for the entire lead time. Kept proportional to the
+      // configured window instead of a fixed 25 days so it still makes sense if an admin
+      // shortens/lengthens it.
+      const contractReminderDedupeDays = Math.max(1, contractExpiryReminderDays - 5);
 
-      const threeDaysFromNow = new Date();
-      threeDaysFromNow.setDate(now.getDate() + 3);
+      const contractExpiryThreshold = new Date();
+      contractExpiryThreshold.setDate(now.getDate() + contractExpiryReminderDays);
+
+      const paymentDueThreshold = new Date();
+      paymentDueThreshold.setDate(now.getDate() + paymentDueReminderDays);
 
       const results = {
         contracts: 0,
@@ -78,27 +76,30 @@ export function createApp() {
         errors: [] as string[]
       };
 
-      // 1. Process Contracts (Expiring in 30 days)
+      // 1. Process Contracts (Expiring within the configured window)
       const activeContracts = await prisma.contract.findMany({ where: { status: 'active' } });
 
       for (const contract of activeContracts) {
         const endDate = contract.endDate;
 
-        // If expiring in less than 30 days and no reminder sent in last 30 days
-        if (endDate <= thirtyDaysFromNow && endDate > now) {
+        // If expiring within the window and no reminder sent recently
+        if (endDate <= contractExpiryThreshold && endDate > now) {
           const lastReminder = contract.reminderSentAt;
-          if (!lastReminder || (now.getTime() - lastReminder.getTime() > 25 * 24 * 60 * 60 * 1000)) {
+          if (!lastReminder || (now.getTime() - lastReminder.getTime() > contractReminderDedupeDays * 24 * 60 * 60 * 1000)) {
             const tenant = await prisma.user.findUnique({ where: { id: contract.tenantUid } });
 
             if (tenant?.email) {
               const subject = `Lembrete: Seu contrato está próximo do vencimento`;
-              const body = `
-                <h2>Olá ${tenant.displayName},</h2>
-                <p>Seu contrato de aluguel está previsto para encerrar em <b>${endDate.toLocaleDateString('pt-BR')}</b>.</p>
-                <p>Por favor, entre em contato com o proprietário para discutir a renovação ou os próximos passos.</p>
-                <br/>
-                <p>Atenciosamente,<br/>${appName}</p>
-              `;
+              const body = emailLayout({
+                appName,
+                heading: 'Seu contrato está vencendo em breve ⏳',
+                bodyHtml: `
+                  <p>Seu contrato de aluguel está previsto para encerrar em <strong>${endDate.toLocaleDateString('pt-BR')}</strong>.</p>
+                  <p>Por favor, entre em contato com o proprietário para discutir a renovação ou os próximos passos.</p>
+                `,
+                ctaLabel: 'Acessar Plataforma',
+                ctaUrl: appUrl || undefined,
+              });
 
               try {
                 await sendMail({ to: tenant.email, subject, html: body });
@@ -113,14 +114,14 @@ export function createApp() {
         }
       }
 
-      // 2. Process Payments (Due in 3 days or Overdue)
+      // 2. Process Payments (Due within the configured window, or overdue)
       const duePayments = await prisma.payment.findMany({ where: { status: { in: ['pending', 'overdue'] } } });
 
       for (const payment of duePayments) {
         const dueDate = payment.dueDate;
 
-        // If due in less than 3 days or already overdue
-        if (dueDate <= threeDaysFromNow) {
+        // If due within the window or already overdue
+        if (dueDate <= paymentDueThreshold) {
           const lastReminder = payment.reminderSentAt;
           // Send reminder if none sent today
           if (!lastReminder || (now.toDateString() !== lastReminder.toDateString())) {
@@ -132,15 +133,21 @@ export function createApp() {
                 ? `ALERTA: Pagamento de aluguel ATRASADO`
                 : `Lembrete: Vencimento de aluguel em breve`;
 
-              const body = `
-                <h2>Olá ${tenant.displayName},</h2>
-                <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <b>${formatCurrency(Number(payment.amount))}</b>.</p>
-                <p>Data de vencimento: <b>${dueDate.toLocaleDateString('pt-BR')}</b>.</p>
-                ${isOverdue ? '<p style="color: red; font-weight: bold;">Seu pagamento está ATRASADO. Por favor, regularize o quanto antes.</p>' : ''}
-                <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
-                <br/>
-                <p>Atenciosamente,<br/>${appName}</p>
-              `;
+              const body = emailLayout({
+                appName,
+                heading: isOverdue ? 'Pagamento em atraso ⚠️' : 'Seu aluguel vence em breve 🗓️',
+                bodyHtml: `
+                  <p>Este é um lembrete sobre o pagamento do seu aluguel no valor de <strong>${formatCurrency(Number(payment.amount))}</strong>.</p>
+                  ${emailDetailsTable([
+                    ['Vencimento', dueDate.toLocaleDateString('pt-BR')],
+                    ['Status', isOverdue ? emailBadge('Atrasado', 'red') : emailBadge('Pendente', 'amber')],
+                  ])}
+                  ${isOverdue ? '<p style="color:#dc2626;font-weight:600;">Seu pagamento está atrasado. Por favor, regularize o quanto antes.</p>' : ''}
+                  <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
+                `,
+                ctaLabel: 'Acessar Plataforma',
+                ctaUrl: appUrl || undefined,
+              });
 
               try {
                 await sendMail({ to: tenant.email, subject, html: body });

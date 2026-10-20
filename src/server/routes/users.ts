@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { requireAuth, loadProfile, requireRole, invalidateProfileCache, AuthedRequest } from '../auth.js';
+import { sendInviteEmail } from '../mailer.js';
 
 const router = Router();
 
@@ -51,6 +52,10 @@ router.post('/', requireRole('admin'), async (req, res) => {
       isInvite: true,
     },
   });
+  sendInviteEmail(normalizedEmail, displayName).catch((error) => {
+    console.error('Failed to send invite email:', error);
+  });
+
   res.status(201).json(invite);
 });
 
