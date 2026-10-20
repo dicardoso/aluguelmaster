@@ -26,7 +26,7 @@ export default function BrandLoader() {
         </div>
 
         <div className="flex flex-col items-center gap-3.5">
-          <p className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Contrato Fácil</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Locatto</p>
           <div className="w-40 h-[3px] rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
             <div
               className="w-1/3 h-full rounded-full bg-blue-600 dark:bg-blue-500"

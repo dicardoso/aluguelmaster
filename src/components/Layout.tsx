@@ -132,7 +132,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <div className="p-6 flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
             <Building2 className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            Contrato Fácil
+            Locatto
           </h1>
           <button
             onClick={() => setIsMobileMenuOpen(false)}

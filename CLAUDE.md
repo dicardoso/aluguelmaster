@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-Contrato Fácil is a rental property management system (Portuguese/pt-BR UI) for residential and commercial leases: property listings, contracts with PDF generation, payment tracking, and email notifications. Originally a Google AI Studio applet (Gemini API key still injected at runtime by that platform); the data layer has since migrated off Firestore to Postgres (Neon) — see Architecture below.
+Locatto is a rental property management system (Portuguese/pt-BR UI) for residential and commercial leases: property listings, contracts with PDF generation, payment tracking, and email notifications. Originally a Google AI Studio applet (Gemini API key still injected at runtime by that platform); the data layer has since migrated off Firestore to Postgres (Neon) — see Architecture below.
 
 ## Commands
 

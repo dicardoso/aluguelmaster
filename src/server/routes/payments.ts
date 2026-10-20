@@ -15,7 +15,7 @@ async function sendPaymentReceiptEmail(payment: { tenantUid: string; amount: any
   ]);
   if (!tenant?.email) return;
 
-  const appName = settings?.appName || 'Contrato Fácil';
+  const appName = settings?.appName || 'Locatto';
   const appUrl = process.env.APP_URL || '';
   const paidAtStr = (payment.paidAt ?? new Date()).toISOString().slice(0, 10).split('-').reverse().join('/');
   const dueDateStr = payment.dueDate.toISOString().slice(0, 10).split('-').reverse().join('/');
