@@ -28,7 +28,9 @@ function loadFirebaseConfig() {
 
 const app = initializeApp(loadFirebaseConfig());
 export const auth = getAuth(app);
-export const storage = getStorage(app);
+// Storage is optional outside production: a free (Spark) Firebase project can run Auth
+// alone, and getStorage() throws without a bucket. Callers must handle null.
+export const storage = app.options.storageBucket ? getStorage(app) : null;
 export const googleProvider = new GoogleAuthProvider();
 
 export const signIn = () => signInWithPopup(auth, googleProvider);
