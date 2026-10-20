@@ -1,5 +1,5 @@
 // Mirrors Dashboard.tsx's real layout (title, 4 KPI cards, chart + recent contracts)
-// so there's no layout jump once the data arrives. Design: example_loading/Loading AluguelMaster.dc.html.
+// so there's no layout jump once the data arrives. Design reference: example_loading/ (loading screen mock).
 const bar = 'rounded bg-gray-100 dark:bg-gray-700 animate-pulse';
 
 export default function DashboardSkeleton() {
