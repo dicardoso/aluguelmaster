@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import CryptoJS from 'crypto-js';
 import { prisma } from './prisma.js';
+import { appEnv, isProduction } from './env.js';
 
 let transporter: nodemailer.Transporter | null = null;
 let transporterCacheKey = '';
@@ -36,6 +37,13 @@ async function getTransporter() {
 }
 
 export async function sendMail({ to, subject, html }: { to: string; subject: string; html: string }) {
+  // Develop/local databases may hold real tenant addresses copied from production, and
+  // the app's SMTP settings live in that same database — never deliver from there.
+  if (!isProduction) {
+    console.log(`EMAIL SUPPRESSED (APP_ENV=${appEnv}):`, { to, subject });
+    return;
+  }
+
   const { transporter: mailTransporter, settings } = await getTransporter();
   const from = settings?.emailFrom || process.env.SMTP_FROM || 'no-reply@gestaoimobiliaria.com';
 
