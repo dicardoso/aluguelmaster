@@ -1,7 +1,7 @@
 import { Building2 } from 'lucide-react';
 
 // Full-app splash — shown while Firebase auth resolves and the profile bootstraps
-// (see ProtectedRoute in App.tsx). Design: example_loading/Loading AluguelMaster.dc.html.
+// (see ProtectedRoute in App.tsx). Design reference: example_loading/ (loading screen mock).
 export default function BrandLoader() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 transition-colors">
@@ -26,7 +26,7 @@ export default function BrandLoader() {
         </div>
 
         <div className="flex flex-col items-center gap-3.5">
-          <p className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">AluguelMaster</p>
+          <p className="text-xl font-bold text-gray-900 dark:text-white tracking-tight">Contrato Fácil</p>
           <div className="w-40 h-[3px] rounded-full overflow-hidden bg-gray-200 dark:bg-gray-700">
             <div
               className="w-1/3 h-full rounded-full bg-blue-600 dark:bg-blue-500"

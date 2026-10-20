@@ -24,7 +24,7 @@ export default function Login() {
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-200 dark:shadow-none">
             <Building2 className="w-10 h-10 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">AluguelMaster</h1>
+          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Contrato Fácil</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2 text-center">
             Gestão inteligente de contratos de aluguel residencial e comercial.
           </p>

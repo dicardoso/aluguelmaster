@@ -111,7 +111,7 @@ export function emailBadge(text: string, tone: 'blue' | 'green' | 'red' | 'amber
 
 export async function sendWelcomeEmail(to: string, name: string) {
   const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Contrato Fácil';
   const appUrl = process.env.APP_URL || '';
 
   const html = emailLayout({
@@ -132,7 +132,7 @@ export async function sendWelcomeEmail(to: string, name: string) {
 
 export async function sendInviteEmail(to: string, name: string) {
   const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Contrato Fácil';
   const appUrl = process.env.APP_URL || '';
 
   const html = emailLayout({

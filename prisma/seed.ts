@@ -32,7 +32,7 @@ async function main() {
 
   const landlord = await upsertInvite({
     id: "invite_seed_landlord",
-    email: "locador.exemplo@aluguelmaster.local",
+    email: "locador.exemplo@contratofacil.local",
     displayName: "Carlos Proprietário",
     role: "landlord",
     cpf: "111.111.111-11",
@@ -41,7 +41,7 @@ async function main() {
 
   const tenant = await upsertInvite({
     id: "invite_seed_tenant",
-    email: "inquilino.exemplo@aluguelmaster.local",
+    email: "inquilino.exemplo@contratofacil.local",
     displayName: "Ana Inquilina",
     role: "tenant",
     cpf: "222.222.222-22",

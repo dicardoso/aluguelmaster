@@ -54,7 +54,7 @@ export function createApp() {
       const now = new Date();
 
       const settings = await prisma.settings.findUnique({ where: { id: 'global' } });
-      const appName = settings?.appName || 'AluguelMaster';
+      const appName = settings?.appName || 'Contrato Fácil';
       const appUrl = process.env.APP_URL || '';
       const contractExpiryReminderDays = settings?.contractExpiryReminderDays ?? 30;
       const paymentDueReminderDays = settings?.paymentDueReminderDays ?? 3;

@@ -68,7 +68,7 @@ async function sendContractEmail(
     prisma.settings.findUnique({ where: { id: 'global' } }),
   ]);
 
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Contrato Fácil';
   const appUrl = process.env.APP_URL || '';
   const actionLabel = type === 'new' ? 'gerado' : 'renovado';
   const details = emailDetailsTable([
@@ -130,7 +130,7 @@ async function sendContractCancelledEmail(contract: { propertyId: string; tenant
     prisma.settings.findUnique({ where: { id: 'global' } }),
   ]);
 
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Contrato Fácil';
   const appUrl = process.env.APP_URL || '';
   const recipients = [tenant, landlord].filter((u): u is NonNullable<typeof u> => !!u?.email);
 

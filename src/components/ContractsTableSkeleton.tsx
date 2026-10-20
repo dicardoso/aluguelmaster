@@ -1,5 +1,5 @@
 // Real header, shimmer rows — matches Contracts.tsx's desktop table columns so the
-// page doesn't jump once data arrives. Design: example_loading/Loading AluguelMaster.dc.html.
+// page doesn't jump once data arrives. Design reference: example_loading/ (loading screen mock).
 const bar = 'rounded bg-gray-100 dark:bg-gray-700 animate-pulse';
 
 const ROW_COUNT = 5;
