@@ -133,7 +133,7 @@ model Payment {
 
 model Settings {
   id                     String   @id @default("global")
-  appName                String   @default("AluguelMaster")
+  appName                String   @default("Locatto")
   companyName            String?
   supportEmail           String?
   smtpHost               String?

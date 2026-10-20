@@ -59,7 +59,7 @@ function formatContractPeriod(contract: { startDate: Date; endDate: Date }) {
 
 async function sendContractEmail(
   contract: { propertyId: string; tenantUid: string; landlordUid: string; monthlyRent: any; dueDay: number; startDate: Date; endDate: Date },
-  type: 'new' | 'renew',
+  type: 'new' | 'renew' | 'update',
 ) {
   const [tenant, landlord, property, settings] = await Promise.all([
     prisma.user.findUnique({ where: { id: contract.tenantUid } }),
@@ -68,9 +68,9 @@ async function sendContractEmail(
     prisma.settings.findUnique({ where: { id: 'global' } }),
   ]);
 
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Locatto';
   const appUrl = process.env.APP_URL || '';
-  const actionLabel = type === 'new' ? 'gerado' : 'renovado';
+  const actionLabel = type === 'new' ? 'gerado' : type === 'renew' ? 'renovado' : 'atualizado';
   const details = emailDetailsTable([
     ['Valor Mensal', formatCurrency(Number(contract.monthlyRent))],
     ['Vencimento', `Todo dia ${contract.dueDay || 10}`],
@@ -80,15 +80,21 @@ async function sendContractEmail(
   if (tenant?.email) {
     const subject = type === 'new'
       ? `Novo Contrato de Locação - ${property?.address}`
-      : `Renovação de Contrato de Locação - ${property?.address}`;
+      : type === 'renew'
+        ? `Renovação de Contrato de Locação - ${property?.address}`
+        : `Contrato de Locação Atualizado - ${property?.address}`;
 
     const html = emailLayout({
       appName,
-      heading: type === 'new' ? 'Seu contrato foi gerado 📄' : 'Seu contrato foi renovado 🔄',
+      heading: type === 'new'
+        ? 'Seu contrato foi gerado 📄'
+        : type === 'renew' ? 'Seu contrato foi renovado 🔄' : 'Seu contrato foi atualizado ✏️',
       bodyHtml: `
         <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${actionLabel} com sucesso.</p>
         ${details}
-        <p>Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.</p>
+        <p>${type === 'update'
+          ? 'Os dados acima já refletem a versão corrigida. Acesse a plataforma para baixar o contrato atualizado e conferir seus pagamentos.'
+          : 'Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.'}</p>
       `,
       ctaLabel: 'Ver Contrato',
       ctaUrl: appUrl || undefined,
@@ -130,7 +136,7 @@ async function sendContractCancelledEmail(contract: { propertyId: string; tenant
     prisma.settings.findUnique({ where: { id: 'global' } }),
   ]);
 
-  const appName = settings?.appName || 'AluguelMaster';
+  const appName = settings?.appName || 'Locatto';
   const appUrl = process.env.APP_URL || '';
   const recipients = [tenant, landlord].filter((u): u is NonNullable<typeof u> => !!u?.email);
 
@@ -337,6 +343,120 @@ router.patch('/:id/signed', requireRole('admin', 'landlord'), async (req: Authed
     where: { id: existing.id },
     data: { signedContractUrl, signedAt: new Date() },
   });
+  res.json(serializeContract(updated));
+});
+
+// Corrects a contract that hasn't been signed yet (e.g. a typo made at creation) so the
+// PDF can be regenerated. Once a signed copy is attached the terms are frozen — the
+// signed file would no longer match the data. Email notification is opt-in (`notify`).
+router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
+  const existing = await loadAccessibleContract(req, res);
+  if (!existing) return;
+
+  if (existing.signedContractUrl) {
+    res.status(400).json({ error: 'Contratos já assinados não podem ser editados.' });
+    return;
+  }
+  if (existing.status !== 'active') {
+    res.status(400).json({ error: 'Apenas contratos ativos podem ser editados.' });
+    return;
+  }
+
+  const { propertyId, tenantUid, landlordUid, startDate, endDate, dueDay, monthlyRent, lateFeeEnabled, notify } = req.body ?? {};
+
+  if (!propertyId || !tenantUid || !startDate || !endDate || monthlyRent === undefined) {
+    res.status(400).json({ error: 'Missing required fields' });
+    return;
+  }
+
+  const newStart = new Date(startDate);
+  const newEnd = new Date(endDate);
+  if (Number.isNaN(newStart.getTime()) || Number.isNaN(newEnd.getTime()) || newEnd <= newStart) {
+    res.status(400).json({ error: 'A data de término deve ser posterior à data de início.' });
+    return;
+  }
+  const newDueDay = Number(dueDay) || 10;
+  if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) {
+    res.status(400).json({ error: 'Dia de vencimento inválido.' });
+    return;
+  }
+  const newRent = Number(monthlyRent);
+  if (!Number.isFinite(newRent) || newRent <= 0) {
+    res.status(400).json({ error: 'Valor de aluguel inválido.' });
+    return;
+  }
+
+  const propertyChanged = propertyId !== existing.propertyId;
+  let newProperty = null;
+  if (propertyChanged) {
+    newProperty = await prisma.property.findUnique({ where: { id: propertyId } });
+    if (!newProperty) {
+      res.status(404).json({ error: 'Property not found' });
+      return;
+    }
+    if (req.profile!.role !== 'admin' && newProperty.ownerUid !== req.profile!.id) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    if (newProperty.status !== 'available') {
+      res.status(400).json({ error: 'O imóvel selecionado não está disponível.' });
+      return;
+    }
+  }
+
+  const effectiveLandlordUid = req.profile!.role === 'admin' && landlordUid
+    ? landlordUid
+    : newProperty?.ownerUid ?? existing.landlordUid;
+
+  // The payment schedule is derived from these fields; if any changed it must be rebuilt.
+  const scheduleChanged =
+    tenantUid !== existing.tenantUid ||
+    newStart.getTime() !== existing.startDate.getTime() ||
+    newEnd.getTime() !== existing.endDate.getTime() ||
+    newDueDay !== existing.dueDay ||
+    newRent !== Number(existing.monthlyRent);
+
+  if (scheduleChanged) {
+    const paidCount = await prisma.payment.count({ where: { contractId: existing.id, status: 'paid' } });
+    if (paidCount > 0) {
+      res.status(400).json({
+        error: 'Este contrato já possui pagamentos recebidos, então inquilino, datas, vencimento e valor não podem mais ser alterados.',
+      });
+      return;
+    }
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const contract = await tx.contract.update({
+      where: { id: existing.id },
+      data: {
+        propertyId,
+        tenantUid,
+        landlordUid: effectiveLandlordUid,
+        startDate: newStart,
+        endDate: newEnd,
+        dueDay: newDueDay,
+        monthlyRent: newRent,
+        lateFeeEnabled: !!lateFeeEnabled,
+        // A new end date means the "expiring soon" reminder may need to fire again.
+        ...(newEnd.getTime() !== existing.endDate.getTime() ? { reminderSentAt: null } : {}),
+      },
+    });
+    if (propertyChanged) {
+      await tx.property.update({ where: { id: existing.propertyId }, data: { status: 'available' } });
+      await tx.property.update({ where: { id: propertyId }, data: { status: 'rented' } });
+    }
+    if (scheduleChanged) {
+      await tx.payment.deleteMany({ where: { contractId: existing.id } });
+      await createPaymentsForContract(tx, contract);
+    }
+    return contract;
+  });
+
+  if (notify === true) {
+    sendContractEmail(updated, 'update').catch((error) => console.error('Failed to send contract email:', error));
+  }
+
   res.json(serializeContract(updated));
 });
 
