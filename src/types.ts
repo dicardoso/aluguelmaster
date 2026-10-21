@@ -36,6 +36,7 @@ export interface Contract {
   signedAt?: string;
   signedContractUrl?: string;
   lateFeeEnabled?: boolean;
+  createdAt?: string;
 }
 
 export interface Payment {
