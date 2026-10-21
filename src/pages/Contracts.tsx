@@ -203,21 +203,28 @@ export default function Contracts() {
     let yPos = 20;
     const margin = 20;
     const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
     const contentWidth = pageWidth - 2 * margin;
+    // Looser than jsPDF's 1.15 default — the contract is dense body text.
+    const LINE_HEIGHT_FACTOR = 1.4;
+    // A section heading is only placed if this much room is left below it, so it never
+    // ends up alone at the bottom of a page with its text on the next one.
+    const KEEP_WITH_NEXT = 30;
+    doc.setLineHeightFactor(LINE_HEIGHT_FACTOR);
 
     // Helper to add text and update yPos
     const addText = (text: string, fontSize: number, isBold: boolean = false, align: 'left' | 'center' | 'right' | 'justify' = 'left') => {
       doc.setFontSize(fontSize);
       doc.setFont('helvetica', isBold ? 'bold' : 'normal');
-      
-      const lineHeight = fontSize * 0.3528 * 1.15;
+
+      const lineHeight = fontSize * 0.3528 * LINE_HEIGHT_FACTOR;
       const lines = doc.splitTextToSize(text, contentWidth);
       const textHeight = lines.length * lineHeight;
-      
+
       // Check page break
-      if (yPos + textHeight > doc.internal.pageSize.height - margin) {
+      if (yPos + textHeight > pageHeight - margin) {
         doc.addPage();
-        yPos = margin + 10;
+        yPos = margin;
       }
 
       if (align === 'justify') {
@@ -230,7 +237,12 @@ export default function Contracts() {
     };
 
     const addHeader = (text: string) => {
-      yPos += 4;
+      if (yPos + KEEP_WITH_NEXT > pageHeight - margin) {
+        doc.addPage();
+        yPos = margin;
+      } else {
+        yPos += 4;
+      }
       addText(text, 11, true);
       yPos += 1;
     };
@@ -252,8 +264,9 @@ export default function Contracts() {
       margin: { left: margin, right: margin },
       theme: 'grid',
       headStyles: { fillColor: [242, 242, 242], textColor: [0, 0, 0], fontStyle: 'bold', halign: 'center' },
-      styles: { fontSize: 9, cellPadding: 2 },
-      columnStyles: { 0: { cellWidth: 35 } },
+      // Same size as the body text; bold labels so they read apart from the values.
+      styles: { fontSize: 10, cellPadding: 2.5, lineColor: [200, 200, 200], lineWidth: 0.2 },
+      columnStyles: { 0: { cellWidth: 35, fontStyle: 'bold' } },
       body: [
         [{ content: 'LOCADOR', colSpan: 2, styles: { halign: 'center', fontStyle: 'bold', fillColor: [242, 242, 242] } }],
         ['Nome', landlord?.displayName || 'N/A'],
@@ -313,12 +326,13 @@ export default function Contracts() {
     addParagraph(`E por estarem assim justos e contratados, firmam o presente instrumento em 2 (duas) vias de igual teor e forma, para um só efeito, na presença de 2 (duas) testemunhas também signatárias, comprometendo-se por si, seus herdeiros e sucessores, a cumprir fielmente o presente contrato.`);
 
     // Signatures
-    yPos += 15;
+    yPos += 10;
     
     // Check page break for signatures
-    if (yPos + 40 > doc.internal.pageSize.height - margin) {
+    // The block below (date, 2 signature rows) is ~65mm tall; keep it on one page.
+    if (yPos + 65 > pageHeight - margin) {
       doc.addPage();
-      yPos = margin + 10;
+      yPos = margin;
     }
 
     const today = format(new Date(), "dd 'de' MMMM 'de' yyyy", { locale: ptBR });
@@ -349,6 +363,21 @@ export default function Contracts() {
     yPos += 5;
     doc.text('TESTEMUNHA 1', margin + 35, yPos, { align: 'center' });
     doc.text('TESTEMUNHA 2', pageWidth - margin - 35, yPos, { align: 'center' });
+
+    // Footer on every page: contract id + "Página X de Y", so loose sheets can be matched
+    // to the contract and a missing page is obvious.
+    const totalPages = doc.getNumberOfPages();
+    for (let page = 1; page <= totalPages; page++) {
+      doc.setPage(page);
+      doc.setDrawColor(200);
+      doc.setLineWidth(0.2);
+      doc.line(margin, pageHeight - 15, pageWidth - margin, pageHeight - 15);
+      doc.setFontSize(8);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120);
+      doc.text(`Contrato ${contract.id}`, margin, pageHeight - 10);
+      doc.text(`Página ${page} de ${totalPages}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+    }
 
     const pdfBlobUrl = doc.output('bloburl');
     window.open(pdfBlobUrl, '_blank');
