@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { apiFetch, ApiError } from '../lib/api';
 import { UserProfile, UserRole } from '../types';
-import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save, Search, Filter, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Users as UsersIcon, UserPlus, Shield, User, Phone, Mail, X, Save, Search, Filter, ChevronLeft, ChevronRight, Ban, UserCheck, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { ConfirmModal } from '../components/ConfirmModal';
 import PageLoader from '../components/PageLoader';
@@ -23,6 +23,9 @@ export default function Users() {
   });
 
   const [confirmSave, setConfirmSave] = useState(false);
+  // Tenants are contract counterparts only until the server enables tenant login.
+  const [tenantLogin, setTenantLogin] = useState(false);
+  const [accessAction, setAccessAction] = useState<{ user: UserProfile; kind: 'disable' | 'enable' | 'revoke' } | null>(null);
 
   // Filters and Pagination
   const [searchQuery, setSearchQuery] = useState('');
@@ -44,6 +47,13 @@ export default function Users() {
     if (!profile || !isAdmin) return;
     fetchUsers().finally(() => setLoading(false));
   }, [profile, isAdmin, fetchUsers]);
+
+  useEffect(() => {
+    if (!profile || !isAdmin) return;
+    apiFetch<{ tenantLogin: boolean }>('/api/settings/features')
+      .then((features) => setTenantLogin(features.tenantLogin))
+      .catch((error) => console.error('Failed to load features:', error));
+  }, [profile, isAdmin]);
 
   useEffect(() => {
     setCurrentPage(1);
@@ -83,6 +93,66 @@ export default function Users() {
       toast.error(error instanceof ApiError ? error.message : 'Erro ao salvar usuário.');
     }
   };
+
+  const handleAccessAction = async () => {
+    if (!accessAction) return;
+    const { user, kind } = accessAction;
+    try {
+      if (kind === 'revoke') {
+        await apiFetch(`/api/users/${user.uid}`, { method: 'DELETE' });
+        toast.success('Convite excluído.');
+      } else {
+        await apiFetch(`/api/users/${user.uid}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ disabled: kind === 'disable' }),
+        });
+        toast.success(kind === 'disable' ? 'Acesso desativado.' : 'Acesso reativado.');
+      }
+      await fetchUsers();
+    } catch (error) {
+      console.error('Failed to update user access:', error);
+      toast.error(error instanceof ApiError ? error.message : 'Erro ao atualizar o acesso.');
+    } finally {
+      setAccessAction(null);
+    }
+  };
+
+  // The action that makes sense for a row: pending invites can be deleted, real users can
+  // only be disabled/re-enabled (they're referenced by contracts), and nobody disables themselves.
+  const accessActionFor = (user: UserProfile): 'disable' | 'enable' | 'revoke' | null => {
+    if (user.isInvite) return 'revoke';
+    if (user.uid === profile?.uid) return null;
+    return user.disabled ? 'enable' : 'disable';
+  };
+
+  const accessActionButton = (user: UserProfile, withLabel: boolean) => {
+    const kind = accessActionFor(user);
+    if (!kind) return null;
+    const meta = {
+      disable: { Icon: Ban, label: 'Desativar acesso', cls: 'text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30' },
+      enable: { Icon: UserCheck, label: 'Reativar acesso', cls: 'text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/30' },
+      revoke: { Icon: Trash2, label: 'Excluir convite', cls: 'text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30' },
+    }[kind];
+    return (
+      <button
+        onClick={() => setAccessAction({ user, kind })}
+        title={meta.label}
+        className={`${withLabel ? 'flex items-center gap-2 px-4 py-2 rounded-xl font-medium text-sm bg-gray-50 dark:bg-gray-700/50 text-gray-600 dark:text-gray-300' : 'p-2 rounded-lg transition-all opacity-0 group-hover:opacity-100'} ${withLabel ? '' : meta.cls}`}
+      >
+        <meta.Icon className="w-4 h-4" />
+        {withLabel && meta.label}
+      </button>
+    );
+  };
+
+  const statusBadge = (user: UserProfile) =>
+    user.isInvite ? (
+      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+        {user.role === 'tenant' && !tenantLogin ? 'Apenas cadastro' : 'Convite pendente'}
+      </span>
+    ) : user.disabled ? (
+      <span className="px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400">Desativado</span>
+    ) : null;
 
   if (!isAdmin) {
     return (
@@ -189,6 +259,7 @@ export default function Users() {
                     }`}>
                       {user.role}
                     </span>
+                    {statusBadge(user) && <div className="mt-1">{statusBadge(user)}</div>}
                   </td>
                   <td className="px-6 py-4">
                     <p className="text-sm text-gray-600 dark:text-gray-300 flex items-center gap-1.5">
@@ -199,12 +270,15 @@ export default function Users() {
                     {new Date(user.createdAt).toLocaleDateString()}
                   </td>
                   <td className="px-6 py-4 text-right">
-                    <button
-                      onClick={() => { setEditingUser(user); setFormData(user); setIsModalOpen(true); }}
-                      className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-all opacity-0 group-hover:opacity-100"
-                    >
-                      <Save className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        onClick={() => { setEditingUser(user); setFormData(user); setIsModalOpen(true); }}
+                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                      >
+                        <Save className="w-4 h-4" />
+                      </button>
+                      {accessActionButton(user, false)}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -245,7 +319,10 @@ export default function Users() {
                 </div>
               </div>
 
-              <div className="flex justify-end">
+              {statusBadge(user) && <div>{statusBadge(user)}</div>}
+
+              <div className="flex justify-end gap-2">
+                {accessActionButton(user, true)}
                 <button
                   onClick={() => { setEditingUser(user); setFormData(user); setIsModalOpen(true); }}
                   className="flex items-center gap-2 px-4 py-2 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-xl font-medium text-sm"
@@ -374,6 +451,11 @@ export default function Users() {
                   <option value="landlord">Proprietário (Locador)</option>
                   <option value="admin">Administrador</option>
                 </select>
+                {formData.role === 'tenant' && !tenantLogin && (
+                  <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+                    Inquilinos ficam apenas cadastrados (para contratos e pagamentos) e não têm acesso ao sistema por enquanto.
+                  </p>
+                )}
               </div>
               <div className="pt-4 flex gap-3">
                 <button
@@ -405,6 +487,26 @@ export default function Users() {
           ? `Deseja realmente salvar as alterações no perfil de ${editingUser.displayName}?`
           : `Deseja realmente cadastrar o novo usuário ${formData.displayName}?`}
         confirmText="Confirmar"
+      />
+
+      <ConfirmModal
+        isOpen={!!accessAction}
+        onCancel={() => setAccessAction(null)}
+        onConfirm={handleAccessAction}
+        isDestructive={accessAction?.kind !== 'enable'}
+        title={
+          accessAction?.kind === 'revoke' ? 'Excluir Convite'
+            : accessAction?.kind === 'enable' ? 'Reativar Acesso'
+            : 'Desativar Acesso'
+        }
+        message={
+          accessAction?.kind === 'revoke'
+            ? `Excluir o convite de ${accessAction.user.email}? Essa pessoa não conseguirá mais entrar.`
+            : accessAction?.kind === 'enable'
+              ? `Reativar o acesso de ${accessAction.user.displayName}?`
+              : `Desativar o acesso de ${accessAction?.user.displayName}? Os contratos e pagamentos dessa pessoa são mantidos, mas ela não conseguirá mais entrar.`
+        }
+        confirmText={accessAction?.kind === 'revoke' ? 'Excluir' : accessAction?.kind === 'enable' ? 'Reativar' : 'Desativar'}
       />
     </div>
   );

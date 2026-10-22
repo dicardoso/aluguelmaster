@@ -9,6 +9,8 @@ export interface UserProfile {
   cpf?: string;
   address?: string;
   themePreference?: 'light' | 'dark' | 'system';
+  isInvite?: boolean;
+  disabled?: boolean;
   createdAt: string;
 }
 

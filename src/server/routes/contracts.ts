@@ -5,6 +5,7 @@ import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js
 import { serializeContract } from '../serialize.js';
 import { sendMail, emailLayout, emailDetailsTable } from '../mailer.js';
 import { formatCurrency } from '../../lib/format.js';
+import { tenantLoginEnabled } from '../features.js';
 
 const router = Router();
 
@@ -92,12 +93,15 @@ async function sendContractEmail(
       bodyHtml: `
         <p>Seu contrato de locação para o imóvel em <strong>${property?.address}</strong> foi ${actionLabel} com sucesso.</p>
         ${details}
-        <p>${type === 'update'
-          ? 'Os dados acima já refletem a versão corrigida. Acesse a plataforma para baixar o contrato atualizado e conferir seus pagamentos.'
-          : 'Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.'}</p>
+        <p>${tenantLoginEnabled()
+          ? (type === 'update'
+            ? 'Os dados acima já refletem a versão corrigida. Acesse a plataforma para baixar o contrato atualizado e conferir seus pagamentos.'
+            : 'Você pode acessar a plataforma para baixar o contrato completo e gerenciar seus pagamentos.')
+          : (type === 'update'
+            ? 'Os dados acima já refletem a versão corrigida. Entre em contato com o proprietário para receber o contrato atualizado.'
+            : 'Entre em contato com o proprietário para receber o contrato completo.')}</p>
       `,
-      ctaLabel: 'Ver Contrato',
-      ctaUrl: appUrl || undefined,
+      ...(tenantLoginEnabled() ? { ctaLabel: 'Ver Contrato', ctaUrl: appUrl || undefined } : {}),
     });
 
     try {
@@ -148,8 +152,8 @@ async function sendContractCancelledEmail(contract: { propertyId: string; tenant
         <p>O contrato de locação do imóvel em <strong>${property?.address}</strong> foi cancelado.</p>
         <p>O imóvel foi marcado como disponível na plataforma.</p>
       `,
-      ctaLabel: 'Acessar Plataforma',
-      ctaUrl: appUrl || undefined,
+      // The platform link is pointless to a tenant while they can't sign in.
+      ...(recipient.role !== 'tenant' || tenantLoginEnabled() ? { ctaLabel: 'Acessar Plataforma', ctaUrl: appUrl || undefined } : {}),
     });
 
     try {

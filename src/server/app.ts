@@ -12,6 +12,7 @@ import { prisma } from "./prisma.js";
 import { sendMail, emailLayout, emailDetailsTable, emailBadge } from "./mailer.js";
 import { requireAuth, loadProfile, requireRole } from "./auth.js";
 import { formatCurrency } from "../lib/format.js";
+import { tenantLoginEnabled } from "./features.js";
 
 // Builds the Express app with every /api route wired up, independent of how the
 // process is hosted (a long-lived `app.listen()` in local dev, or a single
@@ -97,8 +98,7 @@ export function createApp() {
                   <p>Seu contrato de aluguel está previsto para encerrar em <strong>${endDate.toLocaleDateString('pt-BR')}</strong>.</p>
                   <p>Por favor, entre em contato com o proprietário para discutir a renovação ou os próximos passos.</p>
                 `,
-                ctaLabel: 'Acessar Plataforma',
-                ctaUrl: appUrl || undefined,
+                ...(tenantLoginEnabled() ? { ctaLabel: 'Acessar Plataforma', ctaUrl: appUrl || undefined } : {}),
               });
 
               try {
@@ -145,8 +145,7 @@ export function createApp() {
                   ${isOverdue ? '<p style="color:#dc2626;font-weight:600;">Seu pagamento está atrasado. Por favor, regularize o quanto antes.</p>' : ''}
                   <p>Ignore este e-mail caso já tenha realizado o pagamento.</p>
                 `,
-                ctaLabel: 'Acessar Plataforma',
-                ctaUrl: appUrl || undefined,
+                ...(tenantLoginEnabled() ? { ctaLabel: 'Acessar Plataforma', ctaUrl: appUrl || undefined } : {}),
               });
 
               try {
