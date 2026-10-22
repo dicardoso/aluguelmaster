@@ -81,8 +81,19 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
     return;
   }
 
+  const parsedAmount = Number(amount);
+  if (typeof amount === 'boolean' || amount === null || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
+    res.status(400).json({ error: 'Valor inválido.' });
+    return;
+  }
+  const parsedDueDate = new Date(dueDate);
+  if (Number.isNaN(parsedDueDate.getTime())) {
+    res.status(400).json({ error: 'Data de vencimento inválida.' });
+    return;
+  }
+
   const payment = await prisma.payment.create({
-    data: { contractId, tenantUid: contract.tenantUid, amount, dueDate: new Date(dueDate), status: 'pending' },
+    data: { contractId, tenantUid: contract.tenantUid, amount: parsedAmount, dueDate: parsedDueDate, status: 'pending' },
   });
   res.status(201).json(serializePayment(payment));
 });
@@ -100,7 +111,17 @@ router.patch('/:id/mark-paid', requireRole('admin', 'landlord'), async (req: Aut
     return;
   }
 
+  // Re-marking would overwrite the original payment date and email the tenant a second receipt.
+  if (existing.status === 'paid') {
+    res.status(409).json({ error: 'Este pagamento já foi baixado.' });
+    return;
+  }
+
   const { paidAt } = req.body ?? {};
+  if (paidAt && Number.isNaN(new Date(paidAt).getTime())) {
+    res.status(400).json({ error: 'Data de pagamento inválida.' });
+    return;
+  }
   const updated = await prisma.payment.update({
     where: { id: existing.id },
     data: { status: 'paid', paidAt: paidAt ? new Date(paidAt) : new Date() },

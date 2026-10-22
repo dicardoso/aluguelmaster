@@ -40,7 +40,12 @@ async function createPaymentsForContract(tx: Prisma.TransactionClient, contract:
 
   const data = [];
   for (let i = 0; i < months; i++) {
-    const dueDate = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + i, contract.dueDay || 10));
+    // Clamp to the month's last day: Date.UTC(y, m, 31) in a 30-day month would roll over
+    // into the next month and leave the schedule with a duplicated and a missing month.
+    const year = start.getUTCFullYear();
+    const month = start.getUTCMonth() + i;
+    const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+    const dueDate = new Date(Date.UTC(year, month, Math.min(contract.dueDay || 10, lastDay)));
     data.push({
       contractId: contract.id,
       tenantUid: contract.tenantUid,
@@ -182,6 +187,30 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
     return;
   }
 
+  const start = new Date(startDate);
+  const end = new Date(endDate);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) {
+    res.status(400).json({ error: 'A data de término deve ser posterior à data de início.' });
+    return;
+  }
+  if (dueDay !== undefined && dueDay !== null && (!Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31)) {
+    res.status(400).json({ error: 'Dia de vencimento inválido.' });
+    return;
+  }
+  const rent = Number(monthlyRent);
+  if (!Number.isFinite(rent) || rent <= 0) {
+    res.status(400).json({ error: 'Valor de aluguel inválido.' });
+    return;
+  }
+  if (property.status !== 'available') {
+    res.status(400).json({ error: 'O imóvel selecionado não está disponível.' });
+    return;
+  }
+  if (!(await prisma.user.findUnique({ where: { id: tenantUid }, select: { id: true } }))) {
+    res.status(400).json({ error: 'Inquilino não encontrado.' });
+    return;
+  }
+
   const effectiveLandlordUid = req.profile!.role === 'admin' && landlordUid ? landlordUid : property.ownerUid;
 
   const contract = await prisma.$transaction(async (tx) => {
@@ -190,10 +219,10 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
         propertyId,
         tenantUid,
         landlordUid: effectiveLandlordUid,
-        startDate: new Date(startDate),
-        endDate: new Date(endDate),
+        startDate: start,
+        endDate: end,
         dueDay: dueDay || 10,
-        monthlyRent,
+        monthlyRent: rent,
         status: 'active',
         lateFeeEnabled: !!lateFeeEnabled,
       },
@@ -289,6 +318,13 @@ router.post('/:id/renew', requireRole('admin', 'landlord'), async (req: AuthedRe
 router.post('/:id/cancel', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
   const existing = await loadAccessibleContract(req, res);
   if (!existing) return;
+
+  // Cancelling frees the property, so a contract that already ended (cancelled/renewed) must not
+  // be able to do it again after the property was rented to someone else.
+  if (existing.status !== 'active' && existing.status !== 'pending') {
+    res.status(400).json({ error: 'Apenas contratos ativos podem ser cancelados.' });
+    return;
+  }
 
   const updated = await prisma.$transaction(async (tx) => {
     const cancelled = await tx.contract.update({ where: { id: existing.id }, data: { status: 'cancelled' } });
@@ -387,6 +423,11 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
   const newRent = Number(monthlyRent);
   if (!Number.isFinite(newRent) || newRent <= 0) {
     res.status(400).json({ error: 'Valor de aluguel inválido.' });
+    return;
+  }
+
+  if (tenantUid !== existing.tenantUid && !(await prisma.user.findUnique({ where: { id: tenantUid }, select: { id: true } }))) {
+    res.status(400).json({ error: 'Inquilino não encontrado.' });
     return;
   }
 

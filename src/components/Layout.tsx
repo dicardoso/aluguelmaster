@@ -257,14 +257,18 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
 
           <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate('/contracts', { state: { openNewModal: true } })}
-              className="hidden sm:flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all hover:shadow-md active:scale-95"
-            >
-              <Plus className="w-4 h-4" />
-              Novo Contrato
-            </button>
-            <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+            {(isAdmin || isLandlord) && (
+              <>
+                <button
+                  onClick={() => navigate('/contracts', { state: { openNewModal: true } })}
+                  className="hidden sm:flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow-sm transition-all hover:shadow-md active:scale-95"
+                >
+                  <Plus className="w-4 h-4" />
+                  Novo Contrato
+                </button>
+                <div className="w-px h-6 bg-gray-200 dark:bg-gray-700 hidden sm:block" />
+              </>
+            )}
             <Link to="/profile" className="flex items-center gap-3 group">
               <div className="text-right hidden md:block">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white leading-tight group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{profile?.displayName}</p>

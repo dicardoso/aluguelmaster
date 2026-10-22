@@ -105,7 +105,14 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
       return;
     }
 
+    // The invite and the real profile share the same (unique) e-mail, and rows created
+    // for the invite (properties, contracts, payments) point at its placeholder id — so the
+    // invite's e-mail is freed first and its references are repointed before it's deleted.
     profile = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: preRegistration.id },
+        data: { email: `migrating+${preRegistration.id}@invalid.local` },
+      });
       const migrated = await tx.user.create({
         data: {
           id: uid,
@@ -118,7 +125,12 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
           themePreference: preRegistration.themePreference,
         },
       });
-      await tx.user.delete({ where: { id: preRegistration.id } });
+      const from = preRegistration.id;
+      await tx.property.updateMany({ where: { ownerUid: from }, data: { ownerUid: uid } });
+      await tx.contract.updateMany({ where: { landlordUid: from }, data: { landlordUid: uid } });
+      await tx.contract.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
+      await tx.payment.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
+      await tx.user.delete({ where: { id: from } });
       return migrated;
     });
 

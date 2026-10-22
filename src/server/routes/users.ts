@@ -5,6 +5,7 @@ import { sendInviteEmail } from '../mailer.js';
 import { tenantLoginEnabled } from '../features.js';
 
 const router = Router();
+const ROLES = ['admin', 'landlord', 'tenant'];
 
 router.use(requireAuth, loadProfile);
 
@@ -31,6 +32,11 @@ router.post('/', requireRole('admin'), async (req, res) => {
 
   if (!email || !displayName) {
     res.status(400).json({ error: 'email and displayName are required' });
+    return;
+  }
+
+  if (role !== undefined && !ROLES.includes(role)) {
+    res.status(400).json({ error: 'Nível de acesso inválido.' });
     return;
   }
 
@@ -71,9 +77,17 @@ router.patch('/:id', requireRole('admin'), async (req: AuthedRequest, res) => {
     res.status(400).json({ error: 'disabled must be a boolean' });
     return;
   }
+  if (role !== undefined && !ROLES.includes(role)) {
+    res.status(400).json({ error: 'Nível de acesso inválido.' });
+    return;
+  }
   // An admin locking themselves out would leave nobody able to undo it from the UI.
   if (disabled === true && req.params.id === req.profile!.id) {
     res.status(400).json({ error: 'Você não pode desativar o próprio acesso.' });
+    return;
+  }
+  if (!(await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true } }))) {
+    res.status(404).json({ error: 'Usuário não encontrado.' });
     return;
   }
 
