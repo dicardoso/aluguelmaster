@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { prisma } from '../prisma.js';
 import { requireAuth, loadProfile, requireRole, invalidateProfileCache, AuthedRequest } from '../auth.js';
 import { sendInviteEmail } from '../mailer.js';
+import { tenantLoginEnabled } from '../features.js';
 
 const router = Router();
 
@@ -52,15 +53,29 @@ router.post('/', requireRole('admin'), async (req, res) => {
       isInvite: true,
     },
   });
-  sendInviteEmail(normalizedEmail, displayName).catch((error) => {
-    console.error('Failed to send invite email:', error);
-  });
+  // A tenant record is just a contract counterpart while tenant login is off — telling them
+  // they "can already access the platform" would be wrong.
+  if (invite.role !== 'tenant' || tenantLoginEnabled()) {
+    sendInviteEmail(normalizedEmail, displayName).catch((error) => {
+      console.error('Failed to send invite email:', error);
+    });
+  }
 
   res.status(201).json(invite);
 });
 
 router.patch('/:id', requireRole('admin'), async (req: AuthedRequest, res) => {
-  const { displayName, role, phone, cpf, address } = req.body ?? {};
+  const { displayName, role, phone, cpf, address, disabled } = req.body ?? {};
+
+  if (disabled !== undefined && typeof disabled !== 'boolean') {
+    res.status(400).json({ error: 'disabled must be a boolean' });
+    return;
+  }
+  // An admin locking themselves out would leave nobody able to undo it from the UI.
+  if (disabled === true && req.params.id === req.profile!.id) {
+    res.status(400).json({ error: 'Você não pode desativar o próprio acesso.' });
+    return;
+  }
 
   const updated = await prisma.user.update({
     where: { id: req.params.id },
@@ -70,10 +85,34 @@ router.patch('/:id', requireRole('admin'), async (req: AuthedRequest, res) => {
       ...(phone !== undefined && { phone }),
       ...(cpf !== undefined && { cpf }),
       ...(address !== undefined && { address }),
+      ...(disabled !== undefined && { disabled }),
     },
   });
   invalidateProfileCache(updated.id);
   res.json(updated);
+});
+
+// Revokes a pending invite. Only invites can be deleted: a user who already logged in is
+// referenced by contracts/payments, so their access is revoked with `disabled` instead.
+router.delete('/:id', requireRole('admin'), async (req, res) => {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+  if (!target) {
+    res.status(404).json({ error: 'Usuário não encontrado.' });
+    return;
+  }
+  if (!target.isInvite) {
+    res.status(400).json({ error: 'Apenas convites pendentes podem ser excluídos. Desative o acesso do usuário.' });
+    return;
+  }
+
+  try {
+    await prisma.user.delete({ where: { id: target.id } });
+  } catch {
+    // The invite is already referenced (e.g. a contract was created for this pre-registered tenant).
+    res.status(409).json({ error: 'Este convite já está vinculado a contratos ou imóveis e não pode ser excluído.' });
+    return;
+  }
+  res.status(204).end();
 });
 
 export default router;

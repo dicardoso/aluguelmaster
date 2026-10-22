@@ -4,6 +4,7 @@ import { requireAuth, loadProfile, requireRole, AuthedRequest } from '../auth.js
 import { serializePayment } from '../serialize.js';
 import { sendMail, emailLayout, emailDetailsTable, emailBadge } from '../mailer.js';
 import { formatCurrency } from '../../lib/format.js';
+import { tenantLoginEnabled } from '../features.js';
 
 const router = Router();
 
@@ -31,10 +32,11 @@ async function sendPaymentReceiptEmail(payment: { tenantUid: string; amount: any
         ['Vencimento', dueDateStr],
         ['Pago em', paidAtStr],
       ])}
-      <p>Você pode acessar a plataforma para baixar o recibo completo.</p>
+      <p>${tenantLoginEnabled()
+        ? 'Você pode acessar a plataforma para baixar o recibo completo.'
+        : 'Entre em contato com o proprietário caso precise do recibo completo.'}</p>
     `,
-    ctaLabel: 'Ver Recibo',
-    ctaUrl: appUrl || undefined,
+    ...(tenantLoginEnabled() ? { ctaLabel: 'Ver Recibo', ctaUrl: appUrl || undefined } : {}),
   });
 
   try {

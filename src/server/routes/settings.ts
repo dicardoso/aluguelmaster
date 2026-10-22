@@ -2,6 +2,7 @@ import { Router } from 'express';
 import CryptoJS from 'crypto-js';
 import { prisma } from '../prisma.js';
 import { requireAuth, loadProfile, requireRole } from '../auth.js';
+import { tenantLoginEnabled } from '../features.js';
 
 const router = Router();
 
@@ -16,6 +17,11 @@ router.get('/thresholds', async (_req, res) => {
     paymentDueReminderDays: settings?.paymentDueReminderDays ?? 3,
     renewalWindowDays: settings?.renewalWindowDays ?? 60,
   });
+});
+
+// Server-side feature switches the UI needs to reflect (e.g. whether an invited tenant can sign in).
+router.get('/features', (_req, res) => {
+  res.json({ tenantLogin: tenantLoginEnabled() });
 });
 
 router.get('/', requireRole('admin'), async (_req, res) => {

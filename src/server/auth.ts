@@ -3,6 +3,7 @@ import admin from 'firebase-admin';
 import { Role, User } from '@prisma/client';
 import { prisma } from './prisma.js';
 import { sendWelcomeEmail } from './mailer.js';
+import { tenantLoginEnabled } from './features.js';
 
 export interface AuthedRequest extends Request {
   firebaseUser?: { uid: string; email: string | null; displayName: string | null };
@@ -20,6 +21,13 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
 
   try {
     const decoded = await admin.auth().verifyIdToken(idToken);
+    // Invites are matched by e-mail, so the token's e-mail must be proven. Google Sign-In
+    // always sets this; it only fails for e-mail/password accounts that skipped verification,
+    // which would otherwise let anyone claim an invite just by typing the invited address.
+    if (decoded.email_verified !== true) {
+      res.status(403).json({ error: 'E-mail não verificado. Entre com uma conta Google.' });
+      return;
+    }
     req.firebaseUser = {
       uid: decoded.uid,
       email: decoded.email ?? null,
@@ -37,6 +45,16 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
 // API call. Profiles change rarely, so a short-lived in-memory cache avoids that — safe
 // because this runs as a single Node process, not multiple instances behind a load balancer.
 const PROFILE_CACHE_TTL_MS = 30_000;
+const ACCESS_DISABLED_MESSAGE = 'Seu acesso foi desativado. Entre em contato com um administrador.';
+const TENANT_LOGIN_UNAVAILABLE_MESSAGE = 'O acesso de inquilinos à plataforma ainda não está disponível.';
+
+// Why this profile can't use the app right now, or null if it can. Applied to cached and
+// freshly-loaded profiles alike so flipping a flag takes effect within the cache TTL.
+function accessDeniedMessage(profile: Pick<User, 'disabled' | 'role'>): string | null {
+  if (profile.disabled) return ACCESS_DISABLED_MESSAGE;
+  if (profile.role === 'tenant' && !tenantLoginEnabled()) return TENANT_LOGIN_UNAVAILABLE_MESSAGE;
+  return null;
+}
 const profileCache = new Map<string, { profile: User; expiresAt: number }>();
 
 export function invalidateProfileCache(uid: string) {
@@ -57,6 +75,11 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
 
   const cached = profileCache.get(uid);
   if (cached && cached.expiresAt > Date.now()) {
+    const deniedMessage = accessDeniedMessage(cached.profile);
+    if (deniedMessage) {
+      res.status(403).json({ error: deniedMessage });
+      return;
+    }
     req.profile = cached.profile;
     next();
     return;
@@ -71,6 +94,14 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
 
     if (!preRegistration) {
       res.status(403).json({ error: 'Nenhum convite encontrado para este e-mail. Solicite acesso a um administrador.' });
+      return;
+    }
+
+    // Checked before migrating so the invite stays pending (and no welcome email goes out)
+    // until tenant login is turned on.
+    const preRegistrationDenied = accessDeniedMessage(preRegistration);
+    if (preRegistrationDenied) {
+      res.status(403).json({ error: preRegistrationDenied });
       return;
     }
 
@@ -96,6 +127,12 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
         console.error('Failed to send welcome email:', error);
       });
     }
+  }
+
+  const deniedMessage = accessDeniedMessage(profile);
+  if (deniedMessage) {
+    res.status(403).json({ error: deniedMessage });
+    return;
   }
 
   req.profile = profile;

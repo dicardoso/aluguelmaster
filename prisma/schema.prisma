@@ -55,6 +55,9 @@ model User {
   address         String?
   themePreference Theme    @default(system)
   isInvite        Boolean  @default(false)
+  // Revoked access: the profile (and the contracts/payments tied to it) is kept, but
+  // loadProfile rejects every request from this user.
+  disabled        Boolean  @default(false)
   createdAt       DateTime @default(now())
 
   propertiesOwned     Property[] @relation("PropertyOwner")
