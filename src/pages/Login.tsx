@@ -1,6 +1,6 @@
 import { signIn } from '../firebase';
 import { useNavigate } from 'react-router-dom';
-import { Building2 } from 'lucide-react';
+import BrandMark from '../components/BrandMark';
 import { toast } from 'sonner';
 
 export default function Login() {
@@ -22,7 +22,7 @@ export default function Login() {
       <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8 border border-gray-100 dark:border-gray-700">
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-blue-600 rounded-2xl flex items-center justify-center mb-4 shadow-lg shadow-blue-200 dark:shadow-none">
-            <Building2 className="w-10 h-10 text-white" />
+            <BrandMark className="w-10 h-10 text-white" />
           </div>
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Locatto</h1>
           <p className="text-gray-500 dark:text-gray-400 mt-2 text-center">
