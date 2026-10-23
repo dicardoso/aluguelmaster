@@ -614,13 +614,110 @@ describe('REMINDERS (/api/reminders/process)', () => {
   });
 });
 
+describe('REVIEW FIXES: concurrency and guards', () => {
+  it('concurrent first requests of an invited user all succeed and send one welcome mail', async () => {
+    const email = `race.${run}@${MAIL_DOMAIN}`;
+    assert.equal((await admin('POST', '/api/users', { email, displayName: 'Race', role: 'landlord' })).status, 201);
+    await waitMail((m) => m.to === email && /convidado/i.test(m.subject));
+    const welcomeBefore = mailsTo(email).filter((m) => /Bem-vindo/i.test(m.subject)).length;
+    const who = client(base, tokenFor({ uid: `test_${run}_race`, email, name: 'Race' }));
+    const rs = await Promise.all(Array.from({ length: 5 }, () => who('GET', '/api/me', undefined, HANG_MS)));
+    assert.deepEqual(rs.map((r) => r.status), [200, 200, 200, 200, 200], rs.map((r) => r.text.slice(0, 80)).join(' | '));
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.equal(mailsTo(email).filter((m) => /Bem-vindo/i.test(m.subject)).length - welcomeBefore, 1, 'exactly one welcome mail');
+  });
+
+  it('concurrent mark-paid: one succeeds, the other gets 409, a single receipt is sent', async () => {
+    const p = await mkProperty(landA);
+    const c = await mkContract(landA, p.id, { startDate: '2026-09-01', endDate: '2026-11-01' });
+    const [pay] = await paymentsOf(c.id);
+    const before = mail.length;
+    const rs = await Promise.all([
+      landA('PATCH', `/api/payments/${pay.id}/mark-paid`, {}, HANG_MS),
+      landA('PATCH', `/api/payments/${pay.id}/mark-paid`, {}, HANG_MS),
+    ]);
+    assert.deepEqual(rs.map((r) => r.status).sort(), [200, 409], rs.map((r) => r.text.slice(0, 80)).join(' | '));
+    await new Promise((r) => setTimeout(r, 1000));
+    assert.equal(mail.slice(before).filter((m) => /Recibo/.test(m.subject)).length, 1, 'one receipt');
+  });
+
+  it('concurrent contract creation on one property: only one wins, no duplicate schedule', async () => {
+    const p = await mkProperty(landA);
+    const body = (tenantUid: string) => ({ propertyId: p.id, tenantUid, startDate: '2026-11-01', endDate: '2027-11-01', dueDay: 5, monthlyRent: 1000 });
+    const rs = await Promise.all([
+      landA('POST', '/api/contracts', body(P.tenant.uid), HANG_MS),
+      landA('POST', '/api/contracts', body(P.tenant2.uid), HANG_MS),
+    ]);
+    assert.deepEqual(rs.map((r) => r.status).sort(), [201, 400], rs.map((r) => r.text.slice(0, 80)).join(' | '));
+    assert.equal(await prisma.contract.count({ where: { propertyId: p.id, status: 'active' } }), 1);
+    assert.equal(await prisma.payment.count({ where: { contract: { propertyId: p.id } } }), 12);
+    assert.equal((await prisma.property.findUnique({ where: { id: p.id } }))!.status, 'rented');
+  });
+
+  it('PATCH moving a contract to an already-rented property -> 400 and nothing changes', async () => {
+    const p1 = await mkProperty(landA), p2 = await mkProperty(landA);
+    const c1 = await mkContract(landA, p1.id);
+    await mkContract(landA, p2.id, { tenantUid: P.tenant2.uid });
+    const r = await landA('PATCH', `/api/contracts/${c1.id}`, {
+      propertyId: p2.id, tenantUid: P.tenant.uid, startDate: '2026-11-01', endDate: '2027-11-01', dueDay: 5, monthlyRent: 1000,
+    }, HANG_MS);
+    assert.equal(r.status, 400, r.text);
+    assert.equal((await prisma.contract.findUnique({ where: { id: c1.id } }))!.propertyId, p1.id);
+    assert.equal((await prisma.property.findUnique({ where: { id: p1.id } }))!.status, 'rented');
+  });
+
+  it('contract parties: tenantUid must be a tenant, landlordUid must not be one', async () => {
+    const p = await mkProperty(landA);
+    const base = { propertyId: p.id, startDate: '2026-11-01', endDate: '2027-11-01', monthlyRent: 1000 };
+    const asAdminTenant = await admin('POST', '/api/contracts', { ...base, tenantUid: P.admin.uid }, HANG_MS);
+    assert.equal(asAdminTenant.status, 400, asAdminTenant.text);
+    assert.match(asAdminTenant.json.error, /Inquilino/);
+    const tenantLandlord = await admin('POST', '/api/contracts', { ...base, tenantUid: P.tenant.uid, landlordUid: P.tenant2.uid }, HANG_MS);
+    assert.equal(tenantLandlord.status, 400, tenantLandlord.text);
+    assert.match(tenantLandlord.json.error, /Locador/);
+    assert.equal((await prisma.property.findUnique({ where: { id: p.id } }))!.status, 'available');
+  });
+
+  it('dueDay on create: numeric string is accepted and stored, 0 / 32 / 1.5 / text rejected', async () => {
+    const p = await mkProperty(landA);
+    const body = { propertyId: p.id, tenantUid: P.tenant.uid, startDate: '2026-11-01', endDate: '2027-11-01', monthlyRent: 1000 };
+    for (const bad of [0, 32, 1.5, 'abc']) {
+      assert.equal((await landA('POST', '/api/contracts', { ...body, dueDay: bad }, HANG_MS)).status, 400, `dueDay=${bad}`);
+    }
+    const ok = await landA('POST', '/api/contracts', { ...body, dueDay: '15' }, HANG_MS);
+    assert.equal(ok.status, 201, ok.text);
+    assert.equal(ok.json.dueDay, 15);
+    assert.equal((await paymentsOf(ok.json.id))[0].dueDate.getUTCDate(), 15);
+  });
+
+  it('admins: demoting an admin is allowed while another active admin remains', async () => {
+    const a2 = persona('admin2', 'admin');
+    await createUser(a2);
+    const r = await admin('PATCH', `/api/users/${a2.uid}`, { role: 'landlord' });
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.json.role, 'landlord');
+  });
+
+  it('admins: the last active admin cannot demote themselves (skipped if the DB has other admins)', async (t) => {
+    const others = await prisma.user.count({
+      where: { role: 'admin', isInvite: false, disabled: false, NOT: { email: { endsWith: '@' + MAIL_DOMAIN } } },
+    });
+    if (others > 0) { t.skip('database has non-test admins'); return; }
+    const demote = await admin('PATCH', `/api/users/${P.admin.uid}`, { role: 'landlord' });
+    assert.equal(demote.status, 400, demote.text);
+    assert.match(demote.json.error, /administrador/i);
+    assert.equal((await prisma.user.findUnique({ where: { id: P.admin.uid } }))!.role, 'admin');
+  });
+});
+
 describe('ERROR HANDLING', () => {
-  it('a database error that no explicit validation covers becomes a 4xx (no hang) and rolls back', async () => {
+  it('a nonexistent landlord is rejected with 400 (no hang) and leaves the property available', async () => {
     const p = await mkProperty(landA);
     const r = await admin('POST', '/api/contracts', {
       propertyId: p.id, tenantUid: P.tenant.uid, landlordUid: 'ghost', startDate: '2026-11-01', endDate: '2027-11-01', monthlyRent: 10,
     }, HANG_MS);
-    assert.equal(r.status, 409, `status=${r.status}`);
+    assert.equal(r.status, 400, `status=${r.status}`);
+    assert.match(r.json?.error ?? '', /Locador/);
     assert.equal((await prisma.property.findUnique({ where: { id: p.id } }))!.status, 'available', 'transaction rolled back');
   });
   it('malformed JSON body -> 400', async () => {

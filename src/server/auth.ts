@@ -43,8 +43,10 @@ export async function requireAuth(req: AuthedRequest, res: Response, next: NextF
 // Every authenticated request needs the caller's profile (for role checks), which would
 // otherwise mean a Postgres round-trip on top of the route's own query for every single
 // API call. Profiles change rarely, so a short-lived in-memory cache avoids that — safe
-// because this runs as a single Node process, not multiple instances behind a load balancer.
-const PROFILE_CACHE_TTL_MS = 30_000;
+// only on a single long-lived Node process. On Vercel (serverless) several warm instances
+// each hold their own cache and invalidateProfileCache only reaches the one that served the
+// PATCH, so revoking access wouldn't take effect immediately; the cache is off there.
+const PROFILE_CACHE_TTL_MS = process.env.VERCEL ? 0 : 30_000;
 const ACCESS_DISABLED_MESSAGE = 'Seu acesso foi desativado. Entre em contato com um administrador.';
 const TENANT_LOGIN_UNAVAILABLE_MESSAGE = 'O acesso de inquilinos à plataforma ainda não está disponível.';
 
@@ -87,6 +89,7 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
 
   let profile = await prisma.user.findUnique({ where: { id: uid } });
 
+  let migrated = true;
   if (!profile) {
     const preRegistration = normalizedEmail
       ? await prisma.user.findFirst({ where: { email: normalizedEmail, isInvite: true } })
@@ -108,33 +111,43 @@ export async function loadProfile(req: AuthedRequest, res: Response, next: NextF
     // The invite and the real profile share the same (unique) e-mail, and rows created
     // for the invite (properties, contracts, payments) point at its placeholder id — so the
     // invite's e-mail is freed first and its references are repointed before it's deleted.
-    profile = await prisma.$transaction(async (tx) => {
-      await tx.user.update({
-        where: { id: preRegistration.id },
-        data: { email: `migrating+${preRegistration.id}@invalid.local` },
+    try {
+      profile = await prisma.$transaction(async (tx) => {
+        await tx.user.update({
+          where: { id: preRegistration.id },
+          data: { email: `migrating+${preRegistration.id}@invalid.local` },
+        });
+        const migrated = await tx.user.create({
+          data: {
+            id: uid,
+            email: normalizedEmail,
+            displayName: displayName || preRegistration.displayName,
+            role: preRegistration.role,
+            phone: preRegistration.phone,
+            cpf: preRegistration.cpf,
+            address: preRegistration.address,
+            themePreference: preRegistration.themePreference,
+          },
+        });
+        const from = preRegistration.id;
+        await tx.property.updateMany({ where: { ownerUid: from }, data: { ownerUid: uid } });
+        await tx.contract.updateMany({ where: { landlordUid: from }, data: { landlordUid: uid } });
+        await tx.contract.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
+        await tx.payment.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
+        await tx.user.delete({ where: { id: from } });
+        return migrated;
       });
-      const migrated = await tx.user.create({
-        data: {
-          id: uid,
-          email: normalizedEmail,
-          displayName: displayName || preRegistration.displayName,
-          role: preRegistration.role,
-          phone: preRegistration.phone,
-          cpf: preRegistration.cpf,
-          address: preRegistration.address,
-          themePreference: preRegistration.themePreference,
-        },
-      });
-      const from = preRegistration.id;
-      await tx.property.updateMany({ where: { ownerUid: from }, data: { ownerUid: uid } });
-      await tx.contract.updateMany({ where: { landlordUid: from }, data: { landlordUid: uid } });
-      await tx.contract.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
-      await tx.payment.updateMany({ where: { tenantUid: from }, data: { tenantUid: uid } });
-      await tx.user.delete({ where: { id: from } });
-      return migrated;
-    });
+    } catch (error) {
+      // The SPA fires several requests at once on first login; a concurrent one may have
+      // already completed the migration. If the profile exists now, use it (and let that
+      // request send the welcome email) instead of failing a legitimate login.
+      const existing = await prisma.user.findUnique({ where: { id: uid } });
+      if (!existing) throw error;
+      profile = existing;
+      migrated = false;
+    }
 
-    if (normalizedEmail) {
+    if (migrated && normalizedEmail) {
       sendWelcomeEmail(normalizedEmail, displayName || '').catch((error) => {
         console.error('Failed to send welcome email:', error);
       });

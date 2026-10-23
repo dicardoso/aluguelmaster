@@ -86,9 +86,23 @@ router.patch('/:id', requireRole('admin'), async (req: AuthedRequest, res) => {
     res.status(400).json({ error: 'Você não pode desativar o próprio acesso.' });
     return;
   }
-  if (!(await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true } }))) {
+  const target = await prisma.user.findUnique({ where: { id: req.params.id }, select: { id: true, role: true, disabled: true, isInvite: true } });
+  if (!target) {
     res.status(404).json({ error: 'Usuário não encontrado.' });
     return;
+  }
+  // Demoting or disabling an active admin must leave at least one other active admin.
+  const losesAdmin =
+    target.role === 'admin' && !target.isInvite && !target.disabled &&
+    ((role !== undefined && role !== 'admin') || disabled === true);
+  if (losesAdmin) {
+    const otherAdmins = await prisma.user.count({
+      where: { role: 'admin', isInvite: false, disabled: false, id: { not: target.id } },
+    });
+    if (otherAdmins === 0) {
+      res.status(400).json({ error: 'Deve existir pelo menos um administrador ativo.' });
+      return;
+    }
   }
 
   const updated = await prisma.user.update({

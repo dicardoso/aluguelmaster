@@ -169,6 +169,32 @@ async function sendContractCancelledEmail(contract: { propertyId: string; tenant
   }
 }
 
+// Tenants must be tenant-role records and landlords admin/landlord ones; a bare "row exists"
+// check let an admin be a tenant and turned a bad landlord id into a misleading FK error.
+async function validateParties(tenantUid: string | null, landlordUid: string | null): Promise<string | null> {
+  if (tenantUid) {
+    const tenant = await prisma.user.findUnique({ where: { id: tenantUid }, select: { role: true } });
+    if (!tenant || tenant.role !== 'tenant') return 'Inquilino não encontrado.';
+  }
+  if (landlordUid) {
+    const landlord = await prisma.user.findUnique({ where: { id: landlordUid }, select: { role: true } });
+    if (!landlord || landlord.role === 'tenant') return 'Locador não encontrado.';
+  }
+  return null;
+}
+
+// Marks the property rented only if it is still available, so two concurrent requests
+// can't both pass a read-then-write check and double-book it. Must run inside the transaction.
+async function claimProperty(tx: Prisma.TransactionClient, propertyId: string) {
+  const { count } = await tx.property.updateMany({
+    where: { id: propertyId, status: 'available' },
+    data: { status: 'rented' },
+  });
+  return count === 1;
+}
+
+const PROPERTY_UNAVAILABLE = 'O imóvel selecionado não está disponível.';
+
 router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, res) => {
   const { propertyId, tenantUid, landlordUid, startDate, endDate, dueDay, monthlyRent, lateFeeEnabled } = req.body ?? {};
 
@@ -193,7 +219,8 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
     res.status(400).json({ error: 'A data de término deve ser posterior à data de início.' });
     return;
   }
-  if (dueDay !== undefined && dueDay !== null && (!Number.isInteger(Number(dueDay)) || Number(dueDay) < 1 || Number(dueDay) > 31)) {
+  const newDueDay = dueDay === undefined || dueDay === null || dueDay === '' ? 10 : Number(dueDay);
+  if (!Number.isInteger(newDueDay) || newDueDay < 1 || newDueDay > 31) {
     res.status(400).json({ error: 'Dia de vencimento inválido.' });
     return;
   }
@@ -203,17 +230,19 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
     return;
   }
   if (property.status !== 'available') {
-    res.status(400).json({ error: 'O imóvel selecionado não está disponível.' });
-    return;
-  }
-  if (!(await prisma.user.findUnique({ where: { id: tenantUid }, select: { id: true } }))) {
-    res.status(400).json({ error: 'Inquilino não encontrado.' });
+    res.status(400).json({ error: PROPERTY_UNAVAILABLE });
     return;
   }
 
   const effectiveLandlordUid = req.profile!.role === 'admin' && landlordUid ? landlordUid : property.ownerUid;
+  const partiesError = await validateParties(tenantUid, req.profile!.role === 'admin' && landlordUid ? landlordUid : null);
+  if (partiesError) {
+    res.status(400).json({ error: partiesError });
+    return;
+  }
 
   const contract = await prisma.$transaction(async (tx) => {
+    if (!(await claimProperty(tx, propertyId))) return null;
     const created = await tx.contract.create({
       data: {
         propertyId,
@@ -221,16 +250,19 @@ router.post('/', requireRole('admin', 'landlord'), async (req: AuthedRequest, re
         landlordUid: effectiveLandlordUid,
         startDate: start,
         endDate: end,
-        dueDay: dueDay || 10,
+        dueDay: newDueDay,
         monthlyRent: rent,
         status: 'active',
         lateFeeEnabled: !!lateFeeEnabled,
       },
     });
-    await tx.property.update({ where: { id: propertyId }, data: { status: 'rented' } });
     await createPaymentsForContract(tx, created);
     return created;
   });
+  if (!contract) {
+    res.status(400).json({ error: PROPERTY_UNAVAILABLE });
+    return;
+  }
 
   sendContractEmail(contract, 'new').catch((error) => console.error('Failed to send contract email:', error));
 
@@ -426,11 +458,6 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
     return;
   }
 
-  if (tenantUid !== existing.tenantUid && !(await prisma.user.findUnique({ where: { id: tenantUid }, select: { id: true } }))) {
-    res.status(400).json({ error: 'Inquilino não encontrado.' });
-    return;
-  }
-
   const propertyChanged = propertyId !== existing.propertyId;
   let newProperty = null;
   if (propertyChanged) {
@@ -444,7 +471,7 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
       return;
     }
     if (newProperty.status !== 'available') {
-      res.status(400).json({ error: 'O imóvel selecionado não está disponível.' });
+      res.status(400).json({ error: PROPERTY_UNAVAILABLE });
       return;
     }
   }
@@ -452,6 +479,16 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
   const effectiveLandlordUid = req.profile!.role === 'admin' && landlordUid
     ? landlordUid
     : newProperty?.ownerUid ?? existing.landlordUid;
+
+  // Only parties that actually changed are re-validated, so legacy contracts stay editable.
+  const partiesError = await validateParties(
+    tenantUid !== existing.tenantUid ? tenantUid : null,
+    effectiveLandlordUid !== existing.landlordUid ? effectiveLandlordUid : null,
+  );
+  if (partiesError) {
+    res.status(400).json({ error: partiesError });
+    return;
+  }
 
   // The payment schedule is derived from these fields; if any changed it must be rebuilt.
   const scheduleChanged =
@@ -472,6 +509,7 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
   }
 
   const updated = await prisma.$transaction(async (tx) => {
+    if (propertyChanged && !(await claimProperty(tx, propertyId))) return null;
     const contract = await tx.contract.update({
       where: { id: existing.id },
       data: {
@@ -489,7 +527,6 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
     });
     if (propertyChanged) {
       await tx.property.update({ where: { id: existing.propertyId }, data: { status: 'available' } });
-      await tx.property.update({ where: { id: propertyId }, data: { status: 'rented' } });
     }
     if (scheduleChanged) {
       await tx.payment.deleteMany({ where: { contractId: existing.id } });
@@ -497,6 +534,10 @@ router.patch('/:id', requireRole('admin', 'landlord'), async (req: AuthedRequest
     }
     return contract;
   });
+  if (!updated) {
+    res.status(400).json({ error: PROPERTY_UNAVAILABLE });
+    return;
+  }
 
   if (notify === true) {
     sendContractEmail(updated, 'update').catch((error) => console.error('Failed to send contract email:', error));

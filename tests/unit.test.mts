@@ -56,3 +56,24 @@ describe('format helpers', () => {
     assert.match(s.replace(/\s/g, ' '), /R\$ ?1\.234,50/);
   });
 });
+
+const { forwardAsyncErrors } = await U('server/errors.ts');
+
+describe('forwardAsyncErrors', () => {
+  const mkStack = () => [{ handle: async () => { throw new Error('boom'); } }];
+
+  it('forwards a rejected async handler to next()', async () => {
+    const stack = mkStack();
+    forwardAsyncErrors(stack);
+    const err = await new Promise((resolve) => (stack[0].handle as any)({}, {}, resolve));
+    assert.equal((err as Error).message, 'boom');
+  });
+  it('is idempotent: re-running over the same (module-singleton) router does not re-wrap', () => {
+    const stack = mkStack();
+    forwardAsyncErrors(stack);
+    const once = stack[0].handle;
+    forwardAsyncErrors(stack);
+    forwardAsyncErrors(stack);
+    assert.equal(stack[0].handle, once);
+  });
+});

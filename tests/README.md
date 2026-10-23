@@ -1,6 +1,6 @@
 # Tests
 
-Run against the database in `DATABASE_URL`, so the harness refuses to start unless `APP_ENV` is `develop`, `local` or `test` and the URL doesn't contain `PRODUCTION_DATABASE_HOST`. Everything the tests create uses e-mails under `@e2e.locatto.local` and is deleted afterwards; `Settings` and `reminderSentAt` stamps are snapshotted and restored.
+Run against the database in `DATABASE_URL`, so the harness refuses to start unless `APP_ENV` is `develop`, `local` or `test`, `PRODUCTION_DATABASE_HOST` is set, and the URL doesn't contain it. The guard fails closed: with `PRODUCTION_DATABASE_HOST` unset nothing runs. Set it to the production endpoint's unique part (e.g. `ep-cool-name-123456`, not just `neon.tech`) — it must not appear in the test database's URL. The test database also needs the current schema (every migration under `prisma/migrations/` applied). Everything the tests create uses e-mails under `@e2e.locatto.local` and is deleted afterwards; `Settings` and `reminderSentAt` stamps are snapshotted and restored.
 
 | Command | What it does | Needs |
 |---|---|---|

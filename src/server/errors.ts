@@ -4,21 +4,28 @@ import type { Request, Response, NextFunction } from 'express';
 // route would leave the request hanging and, since Node 15, crash the whole process
 // (on Vercel, the function). Wrapping every layer once at startup forwards those
 // rejections to the error middleware below instead of touching each route.
+// The routers are module-level singletons shared by every createApp() call, so wrapped
+// handlers are tagged and never wrapped twice. Express 5 forwards async rejections itself
+// (and drops the private `_router`), so this whole helper goes away on upgrade.
+const WRAPPED = Symbol('forwardAsyncErrors');
+
 export function forwardAsyncErrors(stack: any[]) {
   for (const layer of stack) {
     if (layer.route) {
       forwardAsyncErrors(layer.route.stack);
     } else if (Array.isArray(layer.handle?.stack)) {
       forwardAsyncErrors(layer.handle.stack); // a mounted Router
-    } else if (typeof layer.handle === 'function' && layer.handle.length < 4) {
+    } else if (typeof layer.handle === 'function' && layer.handle.length < 4 && !layer.handle[WRAPPED]) {
       const original = layer.handle;
-      layer.handle = (req: Request, res: Response, next: NextFunction) => {
+      const wrapped = (req: Request, res: Response, next: NextFunction) => {
         try {
           Promise.resolve(original(req, res, next)).catch(next);
         } catch (error) {
           next(error);
         }
       };
+      (wrapped as any)[WRAPPED] = true;
+      layer.handle = wrapped;
     }
   }
 }

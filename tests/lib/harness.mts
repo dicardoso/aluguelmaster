@@ -26,7 +26,11 @@ await imp('node_modules/dotenv/config.js');
   if (!['develop', 'local', 'test'].includes(process.env.APP_ENV ?? '')) {
     throw new Error(`Refusing to run: APP_ENV is "${process.env.APP_ENV ?? ''}" (tests need develop, local or test).`);
   }
-  if (!dbUrl || (prodHost && dbUrl.includes(prodHost))) {
+  // Fail closed: without knowing the production host there's no way to tell it apart from a test DB.
+  if (!prodHost) {
+    throw new Error('Refusing to run: PRODUCTION_DATABASE_HOST is not set (see .env.example).');
+  }
+  if (!dbUrl || dbUrl.includes(prodHost)) {
     throw new Error('Refusing to run: DATABASE_URL is missing or points at the production database.');
   }
 }
@@ -95,8 +99,11 @@ export async function sweep() {
   const users = await prisma.user.findMany({ where: { email: { endsWith: '@' + MAIL_DOMAIN } }, select: { id: true } });
   const ids = users.map((u: any) => u.id);
   if (!ids.length) return 0;
+  // Include contracts on e2e-owned properties too: a leftover one (other party, aborted test)
+  // would otherwise block deleting the property.
   const contracts = await prisma.contract.findMany({
-    where: { OR: [{ landlordUid: { in: ids } }, { tenantUid: { in: ids } }] }, select: { id: true },
+    where: { OR: [{ landlordUid: { in: ids } }, { tenantUid: { in: ids } }, { property: { ownerUid: { in: ids } } }] },
+    select: { id: true },
   });
   const cids = contracts.map((c: any) => c.id);
   await prisma.payment.deleteMany({ where: { OR: [{ contractId: { in: cids } }, { tenantUid: { in: ids } }] } });
