@@ -9,7 +9,12 @@
     "postinstall": "prisma generate",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "tsx --test --test-concurrency=1 tests/unit.test.mts tests/api.test.mts",
+    "test:unit": "tsx --test tests/unit.test.mts",
+    "test:api": "tsx --test tests/api.test.mts",
+    "test:e2e": "tsx tests/e2e/flows.mts",
+    "test:e2e:real": "tsx tests/e2e/real.mts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.1.0",
@@ -44,6 +49,7 @@
     "@types/node": "^22.14.0",
     "@types/nodemailer": "^7.0.11",
     "autoprefixer": "^10.4.21",
+    "playwright": "^1.64.1",
     "prisma": "^6",
     "tailwindcss": "4.1.14",
     "tsx": "^4.21.0",

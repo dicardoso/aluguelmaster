@@ -16,7 +16,11 @@ Locatto is a rental property management system (Portuguese/pt-BR UI) for residen
 - `npx prisma studio` — spreadsheet-style GUI for browsing/editing the Postgres data
 - `npx prisma generate` — regenerate the Prisma Client after editing `prisma/schema.prisma`
 
-There is no test suite configured in this repo. Package manager is Yarn (see `packageManager` field in package.json), though a `package-lock.json` also exists — prefer `yarn` for installs.
+- `npm test` — unit + API integration tests (`tests/`); they write to the database in `DATABASE_URL`, so the harness refuses to run unless `APP_ENV` is `develop`/`local`/`test`, `PRODUCTION_DATABASE_HOST` is set (it fails closed when unset) and `DATABASE_URL` doesn't contain it. Firebase auth is stubbed and mail is captured, never sent. Details in `tests/README.md`.
+- `npm run test:unit` / `npm run test:api` — each half on its own
+- `npm run test:e2e` — Playwright browser flows by role against the real app (needs `npx playwright install chromium`); `npm run test:e2e:real` does the same with a real Google login
+
+Package manager is Yarn (see `packageManager` field in package.json), though a `package-lock.json` also exists — prefer `yarn` for installs.
 
 ## Architecture
 

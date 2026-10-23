@@ -116,7 +116,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Nome da Empresa</label>
               <input
                 type="text"
-                value={formData.companyName}
+                value={formData.companyName ?? ''}
                 onChange={(e) => setFormData({ ...formData, companyName: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="Ex: Imobiliária XYZ"
@@ -126,7 +126,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">E-mail de Suporte</label>
               <input
                 type="email"
-                value={formData.supportEmail}
+                value={formData.supportEmail ?? ''}
                 onChange={(e) => setFormData({ ...formData, supportEmail: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="suporte@empresa.com"
@@ -151,7 +151,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">E-mail de Remetente (From)</label>
               <input
                 type="email"
-                value={formData.emailFrom}
+                value={formData.emailFrom ?? ''}
                 onChange={(e) => setFormData({ ...formData, emailFrom: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="nao-responda@empresa.com"
@@ -164,7 +164,7 @@ export default function Settings() {
               </label>
               <input
                 type="text"
-                value={formData.smtpHost}
+                value={formData.smtpHost ?? ''}
                 onChange={(e) => setFormData({ ...formData, smtpHost: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="smtp.sendgrid.net"
@@ -174,7 +174,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Porta SMTP</label>
               <input
                 type="number"
-                value={formData.smtpPort}
+                value={formData.smtpPort ?? ''}
                 onChange={(e) => setFormData({ ...formData, smtpPort: Number(e.target.value) })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="587"
@@ -184,7 +184,7 @@ export default function Settings() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Usuário SMTP</label>
               <input
                 type="text"
-                value={formData.smtpUser}
+                value={formData.smtpUser ?? ''}
                 onChange={(e) => setFormData({ ...formData, smtpUser: e.target.value })}
                 className="w-full px-4 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none transition-all"
                 placeholder="apikey"

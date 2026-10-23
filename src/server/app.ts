@@ -13,6 +13,7 @@ import { sendMail, emailLayout, emailDetailsTable, emailBadge } from "./mailer.j
 import { requireAuth, loadProfile, requireRole } from "./auth.js";
 import { formatCurrency } from "../lib/format.js";
 import { tenantLoginEnabled } from "./features.js";
+import { forwardAsyncErrors, errorHandler } from "./errors.js";
 
 // Builds the Express app with every /api route wired up, independent of how the
 // process is hosted (a long-lived `app.listen()` in local dev, or a single
@@ -167,6 +168,9 @@ export function createApp() {
       res.status(500).json({ success: false, error: error.message });
     }
   });
+
+  forwardAsyncErrors((app as any)._router.stack);
+  app.use(errorHandler);
 
   return app;
 }

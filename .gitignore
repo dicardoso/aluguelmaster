@@ -10,3 +10,6 @@ coverage/
 
 .vercel
 .env*
+
+# Browser/E2E test artifacts (screenshots, downloads, Chrome profile)
+tests/.output/
